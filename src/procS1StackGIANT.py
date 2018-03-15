@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 ###############################################################################
-# rtc_sentinel.py
+# procS1StackGIANT.py
 #
 # Project:  APD HYP3
 # Purpose:  Create INSAR time series outputs from GIAnT 
@@ -11,7 +11,7 @@
 # Issues/Caveats:
 #
 ###############################################################################
-# Copyright (c) 2017, Alaska Satellite Facility
+# Copyright (c) 2018, Alaska Satellite Facility
 # 
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Library General Public
@@ -44,10 +44,14 @@ import h5py
 from aps_weather_model import aps_weather_model
 from asf_hyp3 import API
 from os.path import expanduser
+from download_products import download_products
+from getUsernamePassword import getUsernamePassword
+from sortByTime import sortByTime 
 
 def prepareHypFiles(path,hyp,zipFlag):
 
-    createCleanDir("HYP")
+    hypDir = "HYP"
+    createCleanDir(hypDir)
 
     if hyp:
         print "Using Hyp3 subscription named {} to download input files".format(hyp)
@@ -57,54 +61,126 @@ def prepareHypFiles(path,hyp,zipFlag):
         download_products(api,sub_name=hyp)
         path = "hyp3-products"
 
+    zip_cnt = 0
+    dir_cnt = 0
     if path is None:
-        for myfile in os.listdir("."):
+        tmpPath = "."
+    else:
+        tmpPath = path
+
+    for myfile in os.listdir(tmpPath):
+        if path is not None:
+            myfile = os.path.join(path,myfile)
+        if zipFlag:
             if ".zip" in myfile:
                 print "    unzipping file {}".format(myfile)
                 zip_ref = zipfile.ZipFile(myfile, 'r')
-                zip_ref.extractall("HYP")
+                zip_ref.extractall(hypDir)
                 zip_ref.close()
-    else:
-        for myfile in os.listdir(path):
-            print myfile
-            myfile = os.path.join(path,myfile)
-            if "gamma" in myfile and os.path.isdir(myfile):
-                os.symlink(myfile,"{}".format(os.path.join("HYP",os.path.basename(myfile))))
-            elif ".zip" in myfile and zipFlag:
-                print "    unzipping file {}".format(myfile)
-                zip_ref = zipfile.ZipFile(os.path.join(path,myfile), 'r')
-                zip_ref.extractall("HYP")
-                zip_ref.close()
+                zip_cnt = zip_cnt + 1
+        else:
+            if os.path.isdir(myfile) and (len(glob.glob("{}/*_unw_phase.tif".format(myfile)))>0 or len(glob.glob("{}/*_unwrapped.tif".format(myfile)))>0):
+                linkFile = os.path.join(hypDir,os.path.basename(myfile))
+                if not os.path.exists(linkFile):
+                    os.symlink(myfile,linkFile)
+                dir_cnt = dir_cnt + 1
 
-    os.chdir("HYP")
+    if zipFlag and zip_cnt == 0:
+        print "ERROR: Unable to find any zip files to process"
+        exit(1)
+
+    if not zipFlag and dir_cnt == 0:
+        print "ERROR: Unable to find any direcories in {}".format(tmpPath)
+        exit(1)
+        
+    os.chdir(hypDir)
 
     unw_cnt = len(glob.glob("*/*_unw_phase.tif"))
     cor_cnt = len(glob.glob("*/*_corr.tif"))
+
+    old_coh = False
+    if cor_cnt == 0:
+        cor_cnt = len(glob.glob("*/*_coh.tif"))
+        if cor_cnt != 0:
+            old_coh = True         
+
+    old_snap = False
+    if unw_cnt == 0:
+        unw_cnt = len(glob.glob("*/*_unwrapped.tif"))
+        if unw_cnt != 0:
+            old_snap = True
+
     if unw_cnt != cor_cnt:
         print "You are missing files!!! unw_cnt = %s; cor_cnt = %s" % (unw_cnt,cor_cnt)
         exit(1)
 
     f = open('../igram_list.txt','w')
-    for myfile in glob.glob("*/*_unw_phase.tif"):
+    if old_snap:
+        ext = "_unwrapped.tif"
+    else:
+        ext = "_unw_phase.tif"
+
+    for myfile in glob.glob("*/*{}".format(ext)):
         mdate = os.path.basename(myfile.split("_")[0])
         sdate = myfile.split("_")[1]
+        print "{} {} {}".format(myfile,mdate,sdate)
+
+        # Catch the case of S1TBX names
+        if not len(mdate)==15 or len(mdate)==8:
+            print "mdate is not a date or date time {}".format(mdate)
+            mdate = os.path.basename(myfile.split("_")[5])
+            sdate = myfile.split("_")[6]
+            
         pFile = os.path.basename(myfile)
-        cFile = os.path.basename(myfile.replace("_unw_phase.tif","_corr.tif"))
-        txtFile = glob.glob("{}/20*_20*.txt".format(os.path.dirname(myfile)))[0]
+	if not old_coh:
+            cFile = os.path.basename(myfile.replace(ext,"_corr.tif"))
+        else:
+            cFile = os.path.basename(myfile.replace(ext,"_coh.tif"))
+        txtFile = glob.glob("{}/*20*_20*.txt".format(os.path.dirname(myfile)))[0]
         baseline = getParameter(txtFile,"Baseline")
         f.write("{} {} {} {} {}\n".format(mdate,sdate,pFile,cFile,baseline))
+
+    # Older zipfiles don't unzip into their own directory!
+    if (unw_cnt != zip_cnt):
+        for myfile in glob.glob("*{}".format(ext)):
+            mdate = myfile.split("_")[0]
+            sdate = myfile.split("_")[1]
+            pFile = myfile
+            cFile = myfile.replace(ext,"_corr.tif")
+            txtFile = myfile.replace(ext,".txt")
+            baseline = getParameter(txtFile,"Baseline")
+            f.write("{} {} {} {} {}\n".format(mdate,sdate,pFile,cFile,baseline))
+
     f.close()
 
     os.chdir("..")
     createCleanDir("DATA")
     os.chdir("DATA")
-    for myfile in glob.glob("../HYP/*/*_unw_phase.tif"):
-         os.symlink(myfile,os.path.basename(myfile))
-    for myfile in glob.glob("../HYP/*/*_corr.tif"):
-         os.symlink(myfile,os.path.basename(myfile))
+    for myfile in glob.glob("../{}/*/*{}".format(hypDir,ext)):
+         if not os.path.exists(os.path.basename(myfile)):
+             os.symlink(myfile,os.path.basename(myfile))
+    if not old_coh:
+        for myfile in glob.glob("../{}/*/*_corr.tif".format(hypDir)):
+             if not os.path.exists(os.path.basename(myfile)):
+                 os.symlink(myfile,os.path.basename(myfile))
+    else:
+        for myfile in glob.glob("../{}/*/*_coh.tif".format(hypDir)):
+             if not os.path.exists(os.path.basename(myfile)):
+                 os.symlink(myfile,os.path.basename(myfile))
+
+
+    # Older zipfiles don't unzip into their own directory!
+    if (unw_cnt != zip_cnt):
+        for myfile in glob.glob("../{}/*_unw_phase.tif".format(hypDir)):
+            if not os.path.exists(os.path.basename(myfile)):
+                os.symlink(myfile,os.path.basename(myfile))
+        for myfile in glob.glob("../{}/*_corr.tif".format(hypDir)):
+            if not os.path.exists(os.path.basename(myfile)):
+                os.symlink(myfile,os.path.basename(myfile))
+
     os.chdir("..") 
 
-    return('igram_list.txt') 
+    return('igram_list.txt',hypDir) 
 
 
 def getFileList(descFile):
@@ -260,8 +336,11 @@ def makeLinks(params):
     root = "../DATA"
     for i in range(len(params['mdate'])):
         outName = "{}_{}_unw_phase.raw".format(params['mdate'][i][0:8],params['sdate'][i][0:8])
+        print "Linking in file {} to {}".format(os.path.join(root,params['pFile'][i]),outName)
         os.symlink(os.path.join(root,params['pFile'][i]),outName)
+
         outName = "{}_{}_corr.raw".format(params['mdate'][i][0:8],params['sdate'][i][0:8])
+        print "Linking in file {} to {}".format(os.path.join(root,params['cFile'][i]),outName)
         os.symlink(os.path.join(root,params['cFile'][i]),outName)
     os.chdir("..")
 
@@ -295,7 +374,6 @@ def toRaw(myfile):
 def makeGeotiffFiles(h5File,params):
 
     # Open up the HDF5 file
-    os.chdir("Stack")
     source = h5py.File("%s" % h5File)
     imgarray = source["recons"][()]
     maxband = imgarray.shape[0]
@@ -321,10 +399,6 @@ def makeGeotiffFiles(h5File,params):
         outFile = outFile.replace('.raw','.tif')
         saa.write_gdal_file_float(outFile,trans,proj,img)
         
-    for myfile in glob.glob("*.tif"):
-        shutil.move(myfile,"../PRODUCT")
-    os.chdir("..")
-         
 def createCleanDir(dirName):
     if not os.path.isdir(dirName):
         os.mkdir(dirName)
@@ -379,7 +453,7 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     print "Looking for templates in %s" % templateDir
 
     if type == 'hyp':
-        descFile = prepareHypFiles(path,hyp,zipFlag)
+        descFile,hypDir = prepareHypFiles(path,hyp,zipFlag)
     elif type == 'custom':
         if train:
             print "***********************************************************************************"
@@ -413,15 +487,15 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     params['filt'] = filt
 
     if utcTime is None:
-        os.chdir("HYP")
-        txtFile = glob.glob("*/20*_20*.txt")[0]
+        os.chdir(hypDir)
+        txtFile = glob.glob("*/*20*_20*.txt")[0]
         utcTime = getParameter(txtFile,"UTCtime")
         os.chdir("..")
     params['utctime'] = utcTime
 
     if heading is None:
-        os.chdir("HYP")
-        txtFile = glob.glob("*/20*_20*.txt")[0]
+        os.chdir(hypDir)
+        txtFile = glob.glob("*/*20*_20*.txt")[0]
         heading = getParameter(txtFile,"Heading")
         os.chdir("..")
     params['heading'] = heading
@@ -507,27 +581,37 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         cnt = cnt + 1
     execute("convert -delay 120 -loop 0 anno_frame*.png {}".format(name))
     os.chdir("..")
-    createCleanDir("PRODUCT")
+    prodDir = "PRODUCT_{}".format(output)
+    createCleanDir(prodDir)
+
     os.chdir("Stack")    
-    shutil.move(name,"../PRODUCT")
-    os.chdir("..")
+    shutil.move(name,"../{}".format(prodDir))
     makeGeotiffFiles(h5File,params)
-    os.chdir("Stack")
-    shutil.move(h5File,"../PRODUCT/{}.h5".format(output))
+    for myfile in glob.glob("*.tif"):
+        shutil.move(myfile,"../{}".format(prodDir))
+    shutil.move(h5File,"../{}/{}.h5".format(prodDir,output))
     os.chdir("..")
 
     # Clean up
-    os.mkdir("PRODUCT/GIAnT_FILES")
-    shutil.move("prepdataxml.py","PRODUCT/GIAnT_FILES")
-    shutil.move("prepbasxml.py","PRODUCT/GIAnT_FILES")
-    shutil.move("userfn.py","PRODUCT/GIAnT_FILES")
-    shutil.move("ifg.list","PRODUCT/GIAnT_FILES")
-    shutil.move("example.rsc","PRODUCT/GIAnT_FILES")
-    shutil.copy(descFile,"PRODUCT")
+    os.mkdir("{}/GIAnT_FILES".format(prodDir))
+    shutil.move("prepdataxml.py","{}/GIAnT_FILES".format(prodDir))
+    shutil.move("prepbasxml.py","{}/GIAnT_FILES".format(prodDir))
+    shutil.move("userfn.py","{}/GIAnT_FILES".format(prodDir))
+    shutil.move("ifg.list","{}/GIAnT_FILES".format(prodDir))
+    shutil.move("example.rsc","{}/GIAnT_FILES".format(prodDir))
+    shutil.copy(descFile,prodDir)
+
+    if zipFlag:
+        permDir = "hyp3-products-unzipped"
+        if not os.path.isdir(permDir):
+            os.mkdir(permDir)
+        for myfile in glob.glob("{}/*".format(hypDir)):
+            shutil.move(myfile,permDir)
+        if not leave:
+            shutil.rmtree(hypDir)
+   
 
     if not leave:
-        if type == "hyp":
-            shutil.rmtree("HYP")
         shutil.rmtree("DATA")
         shutil.rmtree("LINKS")
         shutil.rmtree("Stack")
@@ -536,6 +620,43 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         os.remove("userfn.pyc")
         os.remove("sbas.xml")
 
+
+def procS1StackGroupsGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
+                     path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
+                     zipFlag=False,group=False):
+    
+    if type == 'hyp' and group:
+        if path is not None:
+            filelist = glob.glob("{}/S1*.zip".format(path))
+        else:
+            filelist = glob.glob("S1*.zip")
+
+        if len(filelist)==0:
+            print "ERROR: Unable to find zip files"
+            exit(1)
+
+        classes, filelists = sortByTime(filelist)
+        for i in range(len(classes)):
+            if len(filelists[i])>2:
+                mydir = "DATA_{}".format(classes[i])
+                createCleanDir(mydir)
+                for myfile in filelists[i]:
+                    thisDir = "../sorted_{}".format(classes[i])
+                    inFile = "{}/{}".format(thisDir,myfile)
+                    outFile = "{}/{}".format(mydir,myfile)
+                    os.symlink(inFile,outFile)
+                outfile = output + "_" + classes[i]
+                procS1StackGIANT(type,outfile,descFile=descFile,rxy=rxy,nvalid=nvalid,nsbas=nsbas,filt=filt,
+                     path=mydir,utcTime=utcTime,heading=heading,leave=leave,train=train,hyp=hyp,
+                     zipFlag=True)
+                shutil.rmtree(mydir)
+    else:
+        procS1StackGIANT(type,output,descFile=descFile,rxy=rxy,nvalid=nvalid,nsbas=nsbas,filt=filt,
+             path=path,utcTime=utcTime,heading=heading,leave=leave,train=train,hyp=hyp,
+             zipFlag=zipFlag)
+
+
+
 if __name__ == '__main__':
 
   parser = argparse.ArgumentParser(prog='procS1StackGIANT.py',description='Run a stack of interferograms through GIANT')
@@ -543,6 +664,7 @@ if __name__ == '__main__':
   parser.add_argument("output",help='Basename to be used for output files')
   parser.add_argument("-d","--desc",help='Name of descriptor file')
   parser.add_argument("-f","--filter",type=float,default=0.1,help='Filter length in years (Default=0.1)')
+  parser.add_argument("-g","--group",action="store_true",help="Group files by time before processing")
   parser.add_argument("-i","--input",help="Name of the Hyp3 subscription to download for input files")
   parser.add_argument("-l","--leave",action="store_true",help="Leave intermediate files in place")
   parser.add_argument("-n","--nsbas",action="store_true",help='Run NSBAS inversion instead of SBAS')
@@ -555,7 +677,7 @@ if __name__ == '__main__':
   parser.add_argument("-z","--zip",action='store_true',help="Start from hyp3 zip files instead of directories")
   args = parser.parse_args()
 
-  procS1StackGIANT(args.type,args.output,descFile=args.desc,rxy=args.rxy,nvalid=args.nvalid,nsbas=args.nsbas,
+  procS1StackGroupsGIANT(args.type,args.output,descFile=args.desc,rxy=args.rxy,nvalid=args.nvalid,nsbas=args.nsbas,
                    filt=args.filter,path=args.path,utcTime=args.utc,heading=args.heading,leave=args.leave,
-                   train=args.train,hyp=args.input,zipFlag=args.zip)
+                   train=args.train,hyp=args.input,zipFlag=args.zip,group=args.group)
 
