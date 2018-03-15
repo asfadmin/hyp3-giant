@@ -38,6 +38,10 @@ from execute import execute
 import saa_func_lib as saa
 import numpy as np
 from cutGeotiffsByLine import cutGeotiffsByLine
+from download_products import download_products
+from getUsernamePassword import getUsernamePassword
+from asf_hyp3 import API
+from os.path import expanduser
 
 global log
 
@@ -147,7 +151,8 @@ def getDates(filelist):
     for myfile in filelist:
         myfile = os.path.basename(myfile)
         s = myfile.split("-")[4]
-        if len(s) == 26:
+        
+        if len(s) <= 26:
             t = s.split("_")[0]
             dates.append(t)
         else:       
@@ -217,12 +222,12 @@ def cutStack(filelist,overlap,clip,shape,thresh):
         filelist = fix_projections(filelist)
         power_filelist = cutGeotiffsByLine(filelist)
     elif clip is not None:
-        plog("Clipping to bounding box {} {} {} {}".format(pt1,pt2,pt3,pt4))
         filelist = fix_projections(filelist)
         pt1 = clip[0]
         pt2 = clip[1]
         pt3 = clip[2]
         pt4 = clip[3]
+        plog("Clipping to bounding box {} {} {} {}".format(pt1,pt2,pt3,pt4))
         plog("Statistics for clipping:")
         plog("file name : percent overlap : result")
         power_filelist = []
@@ -255,10 +260,73 @@ def mexit(code):
     log.close()
     exit(code)
 
+def fix_file_list(filelist,clip):
+    pt1 = clip[0]
+    pt2 = clip[1]
+    pt3 = clip[2]
+    pt4 = clip[3]
+
+    # Find location of best overlap with a scene
+    max_frac = 0.0
+    for i in range(len(filelist)):
+        myfile,frac = cut(pt1,pt2,pt3,pt4,filelist[i],thresh=0.01)
+        if frac > max_frac:
+            max_frac = frac
+            max_file = filelist[i]
+    if max_frac == 0:
+        plog("ERROR: None of the input scenes overlap with your area of interest!")
+        mexit(1)
+    loc = filelist.index(max_file)
+    
+    #
+    # Make best overlap image the first in the list
+    # This way, when we go to fix projections, we have the correct
+    # starting image for our bounding box.
+    #
+    tmp = filelist[0]
+    filelist[0] = filelist[loc]
+    filelist[loc] = tmp
+
+def getAscDesc(myxml):
+    with open(myxml) as f:
+        content = f.readlines()
+        for item in content:
+            if 'ascending' in item:
+                 return "a"
+            if 'descending' in item:
+                 return "d"
+
+def getXmlFiles(filelist):
+    dates = getDates(filelist)
+    print "Got dates {}".format(dates)
+    print "In directory {}".format(os.getcwd())
+    newlist = []
+    for date in dates:
+        mydir = glob.glob("*{}*-rtc-gamma".format(date))[0]
+        myfile = glob.glob("{}/*.iso.xml".format(mydir))[0]
+        print "looking for {}".format(myfile)
+        newlist.append(myfile)
+    return(newlist)
+ 
+def cull_list_by_direction(filelist,direction):
+    xmlFiles = getXmlFiles(filelist)
+    print "Got xmlfiles {}".format(xmlFiles)
+    newlist = []
+    for i in range(len(filelist)):
+        myfile = filelist[i]
+        plog("Checking file {} for flight direction".format(myfile))
+        ad = getAscDesc(xmlFiles[i])
+        plog("    Found adflag {}".format(ad))
+        if ad == direction:
+            plog("    Keeping")
+            newlist.append(myfile)
+        else:
+            plog("    Discarding")
+    return newlist 
 
 def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
-    scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=True,leave=False,thresh=0.4,
-    font=24,quick=False,amp=False):
+    scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
+    font=24,quick=False,amp=False,hyp=None,keep=None):
 
     global log
     if outfile is not None:
@@ -272,6 +340,15 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         plog("ERROR: unknown output type {}".format(type))
     else:
         plog("Creating {} output frames".format(type))
+
+    if keep is not None:
+        if keep == 'a':
+            plog("Keeping only ascending images")
+        elif keep == 'd':
+            plog("Keeping only descending images")
+        else:
+            plog("ERROR: Unknown keep value {} - must be either 'a' or 'a'".format(keep))
+            mexit(1)
 
     if shape is not None:
         if not os.path.isfile(shape):
@@ -302,6 +379,14 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     filelist = []
     if infiles is None or len(infiles)==0:
         infiles = None
+        if hyp:
+            plog("Using Hyp3 subscription named {} to download input files".format(hyp))
+            username,password = getUsernamePassword()
+            api = API(username)
+            api.login(password=password)
+            download_products(api,sub_name=hyp)
+            zipFlag = True
+            path = "hyp3-products"
         if zipFlag:
             plog("No input files given, using hyp3 zip files from {}".format(path))
             for myfile in os.listdir(path):
@@ -319,6 +404,13 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
             os.chdir("..")
         os.chdir("TEMP")
         filelist = glob.glob("*/*vv*.tif")
+
+        # Older zip files don't unzip into their own directories!
+        if len(filelist) == 0:
+            filelist = glob.glob("*vv*.tif")
+
+        if hyp and clip:
+            fix_file_list(filelist,clip)
         os.chdir("..") 
     else:
         plog("Infiles found; using them")
@@ -341,9 +433,13 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
             os.symlink(filelist[i],os.path.basename(filelist[i]))
             filelist[i] = os.path.basename(filelist[i])
         else:
-            os.symlink("../{}".format(filelist[i]),filelist[i])
+            if not os.path.isfile(filelist[i]):
+                os.symlink("../{}".format(filelist[i]),filelist[i])
     plog("List of files to operate on")
     plog("{}".format(filelist))
+
+    if keep is not None and infiles is None :
+        filelist = cull_list_by_direction(filelist,keep)
 
     if amp:
         filelist = amp2pwr(filelist)
@@ -361,7 +457,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
             filelist = filterStack(filelist)
         if res is not None:
             filelist = changeResStack(filelist,res)
-        power_filelist = cutStack(filelist,overlap,clip,shape)
+        power_filelist = cutStack(filelist,overlap,clip,shape,thresh)
 
     if len(power_filelist)==0:
         plog("ERROR: No images survived the clipping process.")
@@ -469,8 +565,10 @@ if __name__ == "__main__":
     parser.add_argument("-b","--black",type=float,help="Fraction of black required to remove an image (def 0.4)",default=0.4)
     parser.add_argument("-d","--dBscale",nargs=2,metavar=('upper','lower'),type=float,help="Upper and lower dB for scaling (default -40 0)",default=[-40,0])
     parser.add_argument("-f","--filter",action='store_true',help="Apply speckle filtering")
+    parser.add_argument("-k","--keep",choices=['a','d'],help="Switch to keep only ascending or descending images (default is to keep all)")
     parser.add_argument("-l","--leave",action="store_true",help="Leave intermediate files in place")
     parser.add_argument("-m","--magnify",type=int,help="Magnify (set) annotation font size (def 24)",default=24)
+    parser.add_argument("-n","--name",type=str,help="Name of the Hyp3 subscription to download for input files")
     parser.add_argument("-o","--outfile",help="Output animation filename")
     parser.add_argument("-p","--path",help="Path to the input files")
     parser.add_argument("-q","--quick",action="store_true",help="Run in quick mode - perform clipping first, then filtering and resampling")
@@ -485,4 +583,5 @@ if __name__ == "__main__":
  
     procS1StackRTC(outfile=args.outfile,infiles=args.infile,path=args.path,res=args.res,filter=args.filter,
         type=args.type,scale=args.dBscale,clip=args.clip,shape=args.shape,overlap=args.overlap,zipFlag=args.zip,
-        leave=args.leave,thresh=args.black,font=args.magnify,quick=args.quick,amp=args.amp)
+        leave=args.leave,thresh=args.black,font=args.magnify,quick=args.quick,amp=args.amp,hyp=args.name,
+        keep=args.keep)

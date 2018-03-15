@@ -42,10 +42,21 @@ import numpy as np
 import makePNG
 import h5py
 from aps_weather_model import aps_weather_model
+from asf_hyp3 import API
+from os.path import expanduser
 
-def prepareHypFiles(path):
+def prepareHypFiles(path,hyp,zipFlag):
 
     createCleanDir("HYP")
+
+    if hyp:
+        print "Using Hyp3 subscription named {} to download input files".format(hyp)
+        username,password = getUsernamePassword()
+        api = API(username)
+        api.login()
+        download_products(api,sub_name=hyp)
+        path = "hyp3-products"
+
     if path is None:
         for myfile in os.listdir("."):
             if ".zip" in myfile:
@@ -55,7 +66,11 @@ def prepareHypFiles(path):
                 zip_ref.close()
     else:
         for myfile in os.listdir(path):
-            if ".zip" in myfile:
+            print myfile
+            myfile = os.path.join(path,myfile)
+            if "gamma" in myfile and os.path.isdir(myfile):
+                os.symlink(myfile,"{}".format(os.path.join("HYP",os.path.basename(myfile))))
+            elif ".zip" in myfile and zipFlag:
                 print "    unzipping file {}".format(myfile)
                 zip_ref = zipfile.ZipFile(os.path.join(path,myfile), 'r')
                 zip_ref.extractall("HYP")
@@ -349,7 +364,8 @@ def fixFileNamesTrain(params):
             print "***********************************************************************************"
 
 def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
-                     path=None,utcTime=None,heading=None,leave=False,train=False):
+                     path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
+                     zipFlag=False):
 
     print "Type of run is {}".format(type)
 
@@ -363,7 +379,7 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     print "Looking for templates in %s" % templateDir
 
     if type == 'hyp':
-        descFile = prepareHypFiles(path)
+        descFile = prepareHypFiles(path,hyp,zipFlag)
     elif type == 'custom':
         if train:
             print "***********************************************************************************"
@@ -527,6 +543,7 @@ if __name__ == '__main__':
   parser.add_argument("output",help='Basename to be used for output files')
   parser.add_argument("-d","--desc",help='Name of descriptor file')
   parser.add_argument("-f","--filter",type=float,default=0.1,help='Filter length in years (Default=0.1)')
+  parser.add_argument("-i","--input",help="Name of the Hyp3 subscription to download for input files")
   parser.add_argument("-l","--leave",action="store_true",help="Leave intermediate files in place")
   parser.add_argument("-n","--nsbas",action="store_true",help='Run NSBAS inversion instead of SBAS')
   parser.add_argument("-p","--path",help='Path to input files')
@@ -535,9 +552,10 @@ if __name__ == '__main__':
   parser.add_argument("-t","--train",action="store_true",help="Run TRAIN weather model correction prior to time series inversion")
   parser.add_argument("-u","--utc",type=float,help='UTC time of image stack')
   parser.add_argument("-v","--nvalid",type=float,default=0.8,help='Fraction of samples that must be valid for a point to be included for NSBAS inversion.  (Default=0.8)')
+  parser.add_argument("-z","--zip",action='store_true',help="Start from hyp3 zip files instead of directories")
   args = parser.parse_args()
 
   procS1StackGIANT(args.type,args.output,descFile=args.desc,rxy=args.rxy,nvalid=args.nvalid,nsbas=args.nsbas,
                    filt=args.filter,path=args.path,utcTime=args.utc,heading=args.heading,leave=args.leave,
-                   train=args.train)
+                   train=args.train,hyp=args.input,zipFlag=args.zip)
 
