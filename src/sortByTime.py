@@ -4,17 +4,23 @@ import glob
 import os
 import shutil
 
-def getTimes(filelist):
+def getTimes(filelist,filetype):
     times = [] 
     for myfile in filelist: 
-        dt = myfile.split("-")[1]
+        if filetype == 'rtc':
+            dt = myfile.split("_")[4]
+        elif filetype == 'insar':
+            dt = myfile.split("-")[1]
+        else:
+            print "ERROR: Unknown type of file {}".format(filetype)
+            exit(1)
         time = dt.split("T")[1]
         times.append(time)
     return times
 
-def sortByTime(filelist):
+def sortByTime(filelist,filetype):
     print "got files {}".format(filelist)
-    times = getTimes(filelist)
+    times = getTimes(filelist,filetype)
     print "got times {}".format(times)
     classes = []
     lists = []

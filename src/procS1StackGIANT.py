@@ -635,7 +635,7 @@ def procS1StackGroupsGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=F
             print "ERROR: Unable to find zip files"
             exit(1)
 
-        classes, filelists = sortByTime(filelist)
+        classes, filelists = sortByTime(filelist,"insar")
         for i in range(len(classes)):
             if len(filelists[i])>2:
                 mydir = "DATA_{}".format(classes[i])
