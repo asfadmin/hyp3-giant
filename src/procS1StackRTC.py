@@ -34,24 +34,18 @@ import zipfile
 import shutil
 import glob
 from osgeo import gdal
+import ogr
 from execute import execute
 import saa_func_lib as saa
 import numpy as np
 from cutGeotiffsByLine import cutGeotiffsByLine
+from sortByTime import sortByTime
 from download_products import download_products
 from getUsernamePassword import getUsernamePassword
 from asf_hyp3 import API
 from os.path import expanduser
-
-global log
-
-def createCleanDir(dirName):
-    if not os.path.isdir(dirName):
-        os.mkdir(dirName)
-    else:
-        plog("Cleaning up old {} directory".format(dirName))
-        shutil.rmtree(dirName) 
-        os.mkdir(dirName)
+import logging
+from time_series_utils import *
 
 def apply_speckle_filter(fi):
     outfile = fi.replace('.tif','_sf.tif')
@@ -138,7 +132,7 @@ def cut(pt1,pt2,pt3,pt4,fi,thresh=0.4):
     data[data!=0]=1
     frac = np.sum(np.sum(data))/(x*y)
     if frac < thresh: 
-        plog("    Image fraction ({}) less than threshold of {} discarding".format(frac,thresh))
+        logging.info("    Image fraction ({}) less than threshold of {} discarding".format(frac,thresh))
         os.remove(outfile)
         outfile=None
     return(outfile,frac)
@@ -167,17 +161,17 @@ def report_stats(myfile,tmpfile,frac):
         msg = msg + "discarded"
     else:
         msg = msg + "kept"
-    plog(msg)
+    logging.info(msg)
 
 
 def filterStack(filelist):
-    plog("Applying speckle filter")
+    logging.info("Applying speckle filter")
     for i in range(len(filelist)):
         filelist[i] = apply_speckle_filter(filelist[i]) 
     return filelist
 
 def changeResStack(filelist,res):
-    plog("Changing resolution to {}".format(res))
+    logging.info("Changing resolution to {}".format(res))
     for i in range(len(filelist)):
         filelist[i] = changeRes(res,filelist[i]) 
     return filelist
@@ -217,19 +211,18 @@ def fix_projections(filelist):
     return(filelist)
 
 def cutStack(filelist,overlap,clip,shape,thresh):
+    filelist = fix_projections(filelist)
     if overlap:
-        plog("Cutting files to common overlap")
-        filelist = fix_projections(filelist)
+        logging.info("Cutting files to common overlap")
         power_filelist = cutGeotiffsByLine(filelist)
     elif clip is not None:
-        filelist = fix_projections(filelist)
         pt1 = clip[0]
         pt2 = clip[1]
         pt3 = clip[2]
         pt4 = clip[3]
-        plog("Clipping to bounding box {} {} {} {}".format(pt1,pt2,pt3,pt4))
-        plog("Statistics for clipping:")
-        plog("file name : percent overlap : result")
+        logging.info("Clipping to bounding box {} {} {} {}".format(pt1,pt2,pt3,pt4))
+        logging.info("Statistics for clipping:")
+        logging.info("file name : percent overlap : result")
         power_filelist = []
         for i in range(len(filelist)):
             myfile,frac = cut(pt1,pt2,pt3,pt4,filelist[i],thresh=thresh)
@@ -237,8 +230,7 @@ def cutStack(filelist,overlap,clip,shape,thresh):
             if myfile is not None:
                 power_filelist.append(myfile)
     elif shape is not None:
-        plog("Clipping to shape file {}".format(shape))
-        filelist = fix_projections(filelist)
+        logging.info("Clipping to shape file {}".format(shape))
         power_filelist = []
         for i in range(len(filelist)):
             outGeoTIFF = fi.replace('.tif','_shape.tif')
@@ -250,32 +242,49 @@ def cutStack(filelist,overlap,clip,shape,thresh):
 
     return power_filelist
 
-def plog(msg):
-    global log
-    print msg
-    log.write("{}\n".format(msg))
 
-def mexit(code):
-    global log
-    log.close()
-    exit(code)
+def findBestFit(filelist,clip):
 
-def fix_file_list(filelist,clip):
-    pt1 = clip[0]
-    pt2 = clip[1]
-    pt3 = clip[2]
-    pt4 = clip[3]
+    print "got file list {}".format(filelist)
 
-    # Find location of best overlap with a scene
+    lon_min = clip[0]
+    lat_max = clip[1]
+    lon_max = clip[2]
+    lat_min = clip[3]
+    wkt1 = "POLYGON ((%s %s, %s %s, %s %s, %s %s, %s %s))" % (lat_min,lon_min,lat_max,lon_min,lat_max,lon_max,lat_min,lon_max,lat_min,lon_min)
+    poly0 = ogr.CreateGeometryFromWkt(wkt1)
+    total_area = poly0.GetArea()
+    print "Bounding Box {}".format(poly0.ExportToWkt())
+    print "Total area is {}".format(total_area)
+
+    # Find location of best overlap with bounding box
     max_frac = 0.0
     for i in range(len(filelist)):
-        myfile,frac = cut(pt1,pt2,pt3,pt4,filelist[i],thresh=0.01)
+        x,y,trans,proj = saa.read_gdal_file_geo(saa.open_gdal_file(filelist[i]))
+
+        lat_max1 = trans[3]
+        lat_min1 = trans[3] + y*trans[5]
+        lon_min1 = trans[0]
+        lon_max1= trans[0] + x*trans[1]
+
+        wkt2 = "POLYGON ((%s %s, %s %s, %s %s, %s %s, %s %s))" % (lat_min1,lon_min1,lat_max1,lon_min1,lat_max1,lon_max1,lat_min1,lon_max1,lat_min1,lon_min1)
+
+        print "{} Box {}".format(filelist[i],poly0.ExportToWkt())
+        poly1 = ogr.CreateGeometryFromWkt(wkt2)
+        intersect1 = poly0.Intersection(poly1)
+      
+        print "{} Int {}".format(filelist[i],intersect1.ExportToWkt())
+        area1 = intersect1.GetArea()
+        print "area1 is %s" % area1
+    
+        frac = area1 / total_area
+        print "Fraction is {}".format(frac)
         if frac > max_frac:
             max_frac = frac
             max_file = filelist[i]
     if max_frac == 0:
-        plog("ERROR: None of the input scenes overlap with your area of interest!")
-        mexit(1)
+        logging.error("ERROR: None of the input scenes overlap with your area of interest!")
+        exit(1)
     loc = filelist.index(max_file)
     
     #
@@ -314,117 +323,107 @@ def cull_list_by_direction(filelist,direction):
     newlist = []
     for i in range(len(filelist)):
         myfile = filelist[i]
-        plog("Checking file {} for flight direction".format(myfile))
+        logging.info("Checking file {} for flight direction".format(myfile))
         ad = getAscDesc(xmlFiles[i])
-        plog("    Found adflag {}".format(ad))
+        logging.info("    Found adflag {}".format(ad))
         if ad == direction:
-            plog("    Keeping")
+            logging.info("    Keeping")
             newlist.append(myfile)
         else:
-            plog("    Discarding")
+            logging.info("    Discarding")
     return newlist 
 
 def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
     scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-    font=24,quick=False,amp=False,hyp=None,keep=None):
+    font=24,quick=False,amp=False,keep=None):
 
-    global log
-    if outfile is not None:
-        logFile = "{}_run_stats.txt".format(outfile)
-    else:
-        logFile = "run_stats.txt"
-    log = open(logFile,"w")
-
+    # Do some error checking and info printing
     types=['dB','sigma-byte','dB-byte','amp','power']
     if type not in types:
-        plog("ERROR: unknown output type {}".format(type))
+        logging.error("ERROR: unknown output type {}".format(type))
     else:
-        plog("Creating {} output frames".format(type))
+        logging.info("Creating {} output frames".format(type))
 
     if keep is not None:
         if keep == 'a':
-            plog("Keeping only ascending images")
+            logging.info("Keeping only ascending images")
         elif keep == 'd':
-            plog("Keeping only descending images")
+            logging.info("Keeping only descending images")
         else:
-            plog("ERROR: Unknown keep value {} - must be either 'a' or 'a'".format(keep))
-            mexit(1)
+            logging.error("ERROR: Unknown keep value {} - must be either 'a' or 'a'".format(keep))
+            exit(1)
 
     if shape is not None:
         if not os.path.isfile(shape):
-            plog("ERROR: Shape file {} does not exist".format(shape))
-    	    mexit(1)
+            logging.error("ERROR: Shape file {} does not exist".format(shape))
+    	    exit(1)
         if clip is not None:
-            plog("ERROR: Can not use both shapefile and image clipping options")
-            mexit(1)
+            logging.error("ERROR: Can not use both shapefile and image clipping options")
+            exit(1)
         if overlap:
-            plog("ERROR: Can not use both shapefile and clip to overlap options")
-            mexit(1)
+            logging.error("ERROR: Can not use both shapefile and clip to overlap options")
+            exit(1)
     if clip is not None:
         if overlap:
-            plog("ERROR: Can not use both clip to overlap and image clipping options")
-            mexit(1)
+            logging.error("ERROR: Can not use both clip to overlap and image clipping options")
+            exit(1)
 
+    # Make the path into an absolute path
     if path is None:
         path = os.getcwd()
     else:
         if path[0] != "/":
             path = os.path.join(os.getcwd(),path)
         if not os.path.isdir(path):
-            plog("ERROR: Unable to find directory {}".format(path))
-            mexit(1)
+            logging.error("ERROR: Unable to find directory {}".format(path))
+            exit(1)
 
     createCleanDir("TEMP")
 
     filelist = []
     if infiles is None or len(infiles)==0:
         infiles = None
-        if hyp:
-            plog("Using Hyp3 subscription named {} to download input files".format(hyp))
-            username,password = getUsernamePassword()
-            api = API(username)
-            api.login(password=password)
-            download_products(api,sub_name=hyp)
-            zipFlag = True
-            path = "hyp3-products"
         if zipFlag:
-            plog("No input files given, using hyp3 zip files from {}".format(path))
+            logging.info("No input files given, using hyp3 zip files from {}".format(path))
             for myfile in os.listdir(path):
                 if ".zip" in myfile:
-                    plog("    unzipping file {}".format(myfile))
+                    logging.info("    unzipping file {}".format(myfile))
                     zip_ref = zipfile.ZipFile(os.path.join(path,myfile), 'r')
                     zip_ref.extractall("TEMP")
                     zip_ref.close()
         else:
-            plog("No input files given, using already unzipped hyp3 files in {}".format(path))
+            logging.info("No input files given, using already unzipped hyp3 files in {}".format(path))
             os.chdir("TEMP")
             for myfile in os.listdir(path):
                 if os.path.isdir(os.path.join(path,myfile)) and "m-rtc-" in myfile :
                     os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
             os.chdir("..")
+
+        # Now, get the actual list of files
         os.chdir("TEMP")
         filelist = glob.glob("*/*vv*.tif")
-
+        print "FIRST FILE LIST: ".format(filelist)
         # Older zip files don't unzip into their own directories!
-        if len(filelist) == 0:
-            filelist = glob.glob("*vv*.tif")
+        filelist = filelist +  glob.glob("*vv*.tif")
+        print "SECOND FILE LIST: ".format(filelist)
 
-        if hyp and clip:
-            fix_file_list(filelist,clip)
+        if clip:
+            findBestFit(filelist,clip)
         os.chdir("..") 
+
     else:
-        plog("Infiles found; using them")
+        logging.info("Infiles found; using them")
         for myfile in infiles:
             if not os.path.isfile(myfile):
-                plog("ERROR: Can't find input file {}".format(myfile))
-                mexit(1)
+                logging.error("ERROR: Can't find input file {}".format(myfile))
+                exit(1)
             if myfile[0] != "/":
                 myfile = os.path.join(os.getcwd(),myfile)
             filelist.append(myfile)
 
     if len(filelist)==0:
-        plog("ERROR: Found no files to process.")
-        mexit(1)
+        logging.error("ERROR: Found no files to process.")
+        exit(1)
 
     os.chdir("TEMP")
 
@@ -435,8 +434,9 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         else:
             if not os.path.isfile(filelist[i]):
                 os.symlink("../{}".format(filelist[i]),filelist[i])
-    plog("List of files to operate on")
-    plog("{}".format(filelist))
+
+    logging.info("List of files to operate on")
+    logging.info("{}".format(filelist))
 
     if keep is not None and infiles is None :
         filelist = cull_list_by_direction(filelist,keep)
@@ -460,24 +460,24 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         power_filelist = cutStack(filelist,overlap,clip,shape,thresh)
 
     if len(power_filelist)==0:
-        plog("ERROR: No images survived the clipping process.")
+        logging.error("ERROR: No images survived the clipping process.")
         if overlap:
-            plog("ERROR: The image stack does not have overlap.")
+            logging.error("ERROR: The image stack does not have overlap.")
         if shape is not None:
-            plog("ERROR: The image stack does not overlap with the shape file.")
+            logging.error("ERROR: The image stack does not overlap with the shape file.")
         if clip is not None:       
-            plog("ERROR: None of the images have sufficient overlap with the area of interest.")
-            plog("ERROR: You might try lowering the --black value or picking an new area of interest.")
-        mexit(1)
+            logging.error("ERROR: None of the images have sufficient overlap with the area of interest.")
+            logging.error("ERROR: You might try lowering the --black value or picking an new area of interest.")
+        exit(1)
 
     dB_filelist = []
-    plog("Scaling to dB")
+    logging.info("Scaling to dB")
     for tmpfile in power_filelist:
         dBfile = create_dB(tmpfile)
         dB_filelist.append(dBfile)
         
     byte_filelist = []
-    plog("Byte scaling from {} to {}".format(scale[0],scale[1]))
+    logging.info("Byte scaling from {} to {}".format(scale[0],scale[1]))
     for tmpfile in dB_filelist:
         bytefile = byteScale(tmpfile,scale[0],scale[1])
         byte_filelist.append(bytefile)
@@ -526,8 +526,6 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         prodDir = "PRODUCT" 
     createCleanDir(prodDir)
 
-    log.close()
-    shutil.move("../{}".format(logFile),prodDir)
     shutil.move(output,prodDir)
 
     if type == 'power':
@@ -552,11 +550,116 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     
     os.chdir("..")
 
+    # Save unzipped files for later use
+    if zipFlag:
+        permDir = "hyp3-products-unzipped"
+        if not os.path.isdir(permDir):
+            os.mkdir(permDir)
+        logging.info("Looking in {}".format(os.getcwd()))
+        for myfile in glob.glob("TEMP/*"):
+            logging.info("    checking file {}".format(myfile))
+            if os.path.isdir(myfile):
+                newDir = "{}/{}".format(permDir,os.path.basename(myfile))
+                logging.info("        file is directory... moving tree {} to {}".format(myfile,newDir))
+                if os.path.exists(newDir):
+                    shutil.rmtree(newDir)
+                shutil.copytree(myfile,newDir)
+#            else:
+#                logging.info("        file is normal... moving file {} to {}".format(myfile,permDir))
+#                shutil.copy(myfile,permDir)
+
     # Cleanup and exit
     if not leave:
         shutil.rmtree("TEMP")
 
     print "Done!!!"    
+
+def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
+        scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
+        font=24,quick=False,amp=False,hyp=None,keep=None,group=False):
+
+    if outfile is not None:
+        logFile = "{}_run_stats.txt".format(outfile)
+    else:
+        logFile = "run_stats.txt"
+        outfile = "animation"
+    logging.basicConfig(filename=logFile,format='%(asctime)s - %(levelname)s - %(message)s',
+                        datefmt='%m/%d/%Y %I:%M:%S %p',level=logging.DEBUG)
+    logging.getLogger().addHandler(logging.StreamHandler())
+
+    print "\n"
+    logging.info("Starting run")
+    print "\n"
+
+    if hyp:
+        logging.info("Using Hyp3 subscription named {} to download input files".format(hyp))
+        username,password = getUsernamePassword()
+        api = API(username)
+        api.login(password=password)
+        download_products(api,sub_name=hyp)
+        zipFlag = True
+        hyp = None
+        path = "hyp3-products"
+
+    if group and (infiles is None or len(infiles)==0):
+        # Make path into an absolute path
+        if path is not None:
+            if path[0] != "/" and os.path.isdir(path):
+                root = os.getcwd()
+                path = os.path.join(root,path)
+            else:
+                logging.error("ERROR: path {} is not a directory!")
+                exit(1)
+            logging.info("Data path is {}".format(path))
+        else:
+            path = os.getcwd()
+
+        if zipFlag:
+            filelist = glob.glob("{}/S1*.zip".format(path))
+        else:
+            filelist = []
+            print "Path is {}".format(path)
+            for myfile in os.listdir(path):
+                if os.path.isdir(os.path.join(path,myfile)):
+                    filelist.append(myfile)
+
+        if len(filelist)==0:
+            print "ERROR: Unable to find zip files"
+            exit(1)
+
+        classes, filelists = sortByTime(path,filelist,"rtc")
+        for i in range(len(classes)):
+            if len(filelists[i])>2:
+                mydir = "DATA_{}".format(classes[i])
+                createCleanDir(mydir)
+                for myfile in filelists[i]:
+                    thisDir = "../sorted_{}".format(classes[i])
+                    inFile = "{}/{}".format(thisDir,os.path.basename(myfile))
+                    outFile = "{}/{}".format(mydir,os.path.basename(myfile))
+                    print "Linking file {} to file {}".format(inFile,outFile)
+                    os.symlink(inFile,outFile)
+                output = outfile + "_" + classes[i]
+
+                procS1StackRTC(outfile=output,infiles=infiles,path=mydir,res=res,filter=filter,
+                    type=type,scale=scale,clip=None,shape=None,overlap=True,zipFlag=zipFlag,
+                    leave=leave,thresh=thresh,font=font,quick=quick,amp=amp,
+                    keep=keep)
+
+                shutil.rmtree(mydir)
+    else:
+        procS1StackRTC(outfile=outfile,infiles=infiles,path=path,res=res,filter=filter,
+            type=type,scale=scale,clip=clip,shape=shape,overlap=overlap,zipFlag=zipFlag,
+            leave=leave,thresh=thresh,font=font,quick=quick,amp=amp,
+            keep=keep)
+
+    if not leave and group:
+        for myfile in glob.glob("sorted_*"):
+            shutil.rmtree(myfile)
+
+
+
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="procS1StackRTC.py",description="Create RTC time series")
@@ -565,6 +668,7 @@ if __name__ == "__main__":
     parser.add_argument("-b","--black",type=float,help="Fraction of black required to remove an image (def 0.4)",default=0.4)
     parser.add_argument("-d","--dBscale",nargs=2,metavar=('upper','lower'),type=float,help="Upper and lower dB for scaling (default -40 0)",default=[-40,0])
     parser.add_argument("-f","--filter",action='store_true',help="Apply speckle filtering")
+    parser.add_argument("-g","--group",action='store_true',help="Group files by time before processing into stacks.  Turns on overlap option.")
     parser.add_argument("-k","--keep",choices=['a','d'],help="Switch to keep only ascending or descending images (default is to keep all)")
     parser.add_argument("-l","--leave",action="store_true",help="Leave intermediate files in place")
     parser.add_argument("-m","--magnify",type=int,help="Magnify (set) annotation font size (def 24)",default=24)
@@ -580,8 +684,9 @@ if __name__ == "__main__":
     group.add_argument("-s","--shape",type=str,metavar="shapefile",help="Clip output to shape file (mutually exclusive with -c)")
     group.add_argument("-v","--overlap",action="store_true",help="Clip files to common overlap.  Assumes files are already pixel aligned")
     args = parser.parse_args()
- 
-    procS1StackRTC(outfile=args.outfile,infiles=args.infile,path=args.path,res=args.res,filter=args.filter,
+
+    procS1StackGroupsRTC(outfile=args.outfile,infiles=args.infile,path=args.path,res=args.res,filter=args.filter,
         type=args.type,scale=args.dBscale,clip=args.clip,shape=args.shape,overlap=args.overlap,zipFlag=args.zip,
         leave=args.leave,thresh=args.black,font=args.magnify,quick=args.quick,amp=args.amp,hyp=args.name,
-        keep=args.keep)
+        keep=args.keep,group=args.group)
+ 
