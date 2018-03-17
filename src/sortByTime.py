@@ -3,34 +3,47 @@
 import glob
 import os
 import shutil
+import logging
+from time_series_utils import *
 
-def getTimes(filelist,filetype):
+def getTimes(path,filelist,filetype):
+    newlist = []
     times = [] 
     for myfile in filelist: 
-        if filetype == 'rtc':
-            dt = myfile.split("_")[4]
-        elif filetype == 'insar':
-            dt = myfile.split("-")[1]
+        if ".zip" in myfile or os.path.isdir(os.path.join(path,myfile)):       
+            try:
+                if filetype == 'rtc':
+                    dt = myfile.split("_")[4]
+                elif filetype == 'insar':
+                    dt = myfile.split("-")[1]
+                else:
+                    logging.error("ERROR: Unknown type of file {}".format(filetype))
+                    mexit(1)
+                time = dt.split("T")[1]
+                times.append(time)
+                newlist.append(myfile)
+            except:
+                logging.info("Warning: Unable to determine date for file {}; ignoring")
+        # We have a regular file; not a dir or zip
         else:
-            print "ERROR: Unknown type of file {}".format(filetype)
-            exit(1)
-        time = dt.split("T")[1]
-        times.append(time)
-    return times
+            logging.info("Not a zip file or directory - {} - ignoring".format(myfile))
 
-def sortByTime(filelist,filetype):
-    print "got files {}".format(filelist)
-    times = getTimes(filelist,filetype)
-    print "got times {}".format(times)
+    return newlist, times
+
+def sortByTime(path,filelist,filetype):
+
+    logging.info("got files {}".format(filelist))
+    newlist, times = getTimes(path,filelist,filetype)
+    logging.info("got times {}".format(times))
     classes = []
     lists = []
     max_classes = 0
-    for i in range(len(filelist)):
-        print "Placing file {}".format(filelist[i])
+    for i in range(len(newlist)):
+        logging.info("Placing file {}".format(newlist[i]))
         placed = False
         for j in range(len(classes)):
             if abs(int(times[i])-int(classes[j])) < 9:
-                lists[j].append(filelist[i])
+                lists[j].append(newlist[i])
                 placed = True
                 break
         if not placed:
@@ -38,22 +51,22 @@ def sortByTime(filelist,filetype):
             classes.append(times[i])
             namelist = []
             lists.append(namelist)
-            lists[max_classes-1].append(filelist[i])
+            lists[max_classes-1].append(newlist[i])
 
     for i in range(len(classes)):
-        print "Class {} : {} contains".format(i,classes[i])
+        logging.info("Class {} : {} contains".format(i,classes[i]))
         for j in range(len(lists[i])):
-            print "    {}".format(lists[i][j])
+            logging.info("    {}".format(lists[i][j]))
 
     for i in range(len(classes)):
         time = classes[i]
         mydir = "sorted_{}".format(time)
-        if not os.path.isdir(mydir):
-            print "Making directory {}".format(mydir)
-            os.mkdir(mydir)
+        logging.info("Making clean directory {}".format(mydir))
+        createCleanDir(mydir)
         for myfile in lists[i]:
-            print "Moving file {} to {}".format(myfile,mydir)
-            shutil.move(myfile,mydir)
+            newfile = os.path.join(mydir,os.path.basename(myfile))
+            logging.info("Linking file {} to {}".format(os.path.join(path,myfile),newfile))
+            os.symlink(os.path.join(path,myfile),newfile)
 
     return classes, lists
 
