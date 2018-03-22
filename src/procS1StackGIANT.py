@@ -372,7 +372,9 @@ def toRaw(myfile):
         rawname = rawname.replace("_wgs84","")
     if "resize" in rawname:
         rawname = rawname.replace("_resize","")
-    rawname = rawname.replace("_clip.tif",".raw")
+    if "clip" in rawname:
+        rawname = rawname.replace("_clip","")
+    rawname = rawname.replace(".tif",".raw")
     logging.info("    processing file {} to create file {}".format(myfile,rawname))
     gdal.Translate(rawname,myfile,format="ENVI")
     return rawname
@@ -405,8 +407,7 @@ def makeGeotiffFiles(h5File,params):
         outFile = outFile.replace('.raw','.tif')
         saa.write_gdal_file_float(outFile,trans,proj,img)
         
-def makeParmsAPS(params):
-    root = os.getcwd()
+def makeParmsAPS(params,root):
     f = open("parms_aps.txt","w")
     f.write("UTC_sat: {}\n".format(params['utctime']))
     f.write("merra2_datapath: {}\n".format(os.path.join(root,"merra")))
@@ -508,6 +509,7 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         prepareCustomFiles(params,path)
 
     checkFileExistence(params) 
+    root = os.getcwd()
 
     logging.info("Reprojecting files...")
     reprojectFiles(params)
@@ -527,7 +529,7 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     if train:
         createCleanDir("TRAIN")
         os.chdir("TRAIN")
-        makeParmsAPS(params)
+        makeParmsAPS(params,root)
         prepareFilesForTrain(params)
         myfile = os.path.join(os.pardir,params['pFile'][0])
         aps_weather_model("merra2",0,4,myfile)
@@ -627,6 +629,39 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
                 path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
                 zipFlag=False,group=False):
 
+    cmd = "procS1StackGIANT.py "
+    
+    if descFile:
+        cmd = cmd + "--descFile {} ".format(descFile)
+    if rxy:
+        cmd = cmd + "--rxy {} ".format(rxy)
+    if nvalid != 0.80:
+        cmd = cmd + "--nvalid {} ".format(nvalid)
+    if nsbas:
+        cmd = cmd + "--nsbas "
+    if filt != 0.1:
+        cmd = cmd + "--filter {} ".format(filt)
+    if path:
+        cmd = cmd + "--path {} ".format(path)
+    if utcTime:
+        cmd = cmd + "--utc {} ".format(utc)
+    if heading:
+        cmd = cmd + "--heading {} ".format(heading)
+    if leave:
+       cmd = cmd + "--leave "
+    if train:
+       cmd = cmd + "--train "
+    if hyp:
+       cmd = cmd + "--input {} ".format(hyp)
+    if zipFlag: 
+       cmd = cmd + "--zip "
+    if group: 
+       cmd = cmd + "--group "
+           
+    cmd = cmd + "{} ".format(type)
+    cmd = cmd + "{} ".format(output)
+
+    logging.info("Command Run: {}".format(cmd))
     logging.info("Parameters for this run:")
     logging.info("    type of run              : {}".format(type))
     logging.info("    output name              : {}".format(output))
@@ -639,7 +674,7 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
     logging.info("    utc time                 : {}".format(utcTime))
     logging.info("    heading                  : {}".format(heading))
     logging.info("    leave intermediates      : {}".format(leave))
-    logging.info("    trian flag               : {}".format(train))
+    logging.info("    train flag               : {}".format(train))
     logging.info("    hyp name of subscription : {}".format(hyp))
     logging.info("    zip flag                 : {}".format(zipFlag))
     logging.info("    group flag               : {}".format(group))
@@ -719,9 +754,14 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
              filt=filt,path=path,utcTime=utcTime,heading=heading,leave=leave,train=train,
              hyp=hyp)
 
-    if not leave and group:
-        for myfile in glob.glob("sorted_*"):
-            shutil.rmtree(myfile)
+    if not leave:
+        if group:
+            for myfile in glob.glob("sorted_*"):
+                shutil.rmtree(myfile)
+        if train:
+            shutil.rmtree("merra")
+
+
 
 
 if __name__ == '__main__':
