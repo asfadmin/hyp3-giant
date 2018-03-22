@@ -45,7 +45,8 @@ from getUsernamePassword import getUsernamePassword
 from asf_hyp3 import API
 from os.path import expanduser
 import logging
-from time_series_utils import *
+from time_series_utils import createCleanDir 
+from unzipFiles import unzipFiles 
 
 def apply_speckle_filter(fi):
     outfile = fi.replace('.tif','_sf.tif')
@@ -385,12 +386,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         infiles = None
         if zipFlag:
             logging.info("No input files given, using hyp3 zip files from {}".format(path))
-            for myfile in os.listdir(path):
-                if ".zip" in myfile:
-                    logging.info("    unzipping file {}".format(myfile))
-                    zip_ref = zipfile.ZipFile(os.path.join(path,myfile), 'r')
-                    zip_ref.extractall("TEMP")
-                    zip_ref.close()
+            unzipFiles(path,"TEMP")
         else:
             logging.info("No input files given, using already unzipped hyp3 files in {}".format(path))
             os.chdir("TEMP")
@@ -402,10 +398,9 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         # Now, get the actual list of files
         os.chdir("TEMP")
         filelist = glob.glob("*/*vv*.tif")
-        print "FIRST FILE LIST: ".format(filelist)
+
         # Older zip files don't unzip into their own directories!
         filelist = filelist +  glob.glob("*vv*.tif")
-        print "SECOND FILE LIST: ".format(filelist)
 
         if clip:
             findBestFit(filelist,clip)
@@ -552,15 +547,15 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
 
     # Save unzipped files for later use
     if zipFlag:
+        logging.info("Saving unzipped files in directory hyp3-products-unzipped")
         permDir = "hyp3-products-unzipped"
         if not os.path.isdir(permDir):
             os.mkdir(permDir)
         logging.info("Looking in {}".format(os.getcwd()))
         for myfile in glob.glob("TEMP/*"):
-            logging.info("    checking file {}".format(myfile))
             if os.path.isdir(myfile):
                 newDir = "{}/{}".format(permDir,os.path.basename(myfile))
-                logging.info("        file is directory... moving tree {} to {}".format(myfile,newDir))
+                logging.info("    moving tree {} to {}".format(myfile,newDir))
                 if os.path.exists(newDir):
                     shutil.rmtree(newDir)
                 shutil.copytree(myfile,newDir)
@@ -572,16 +567,87 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     if not leave:
         shutil.rmtree("TEMP")
 
-    print "Done!!!"    
+
+def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
+        scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
+        font=24,quick=False,amp=False,hyp=None,keep=None,group=False):
+
+    cmd = "procS1StackRTC.py "
+    if outfile:
+       cmd = cmd + "--outfile {} ".format(outfile)
+    if path:
+       cmd = cmd + "--path {} ".format(path)
+    if res:
+       cmd = cmd + "--res {} ".format(res)
+    if filter:
+       cmd = cmd + "--filt {} ".format(filter)
+    if type != 'dB-byte':
+       cmd = cmd + "--type {} ".format(type)
+    if scale != [-40,0]:
+       cmd = cmd + "--dBscale {} {}".format(scale[0],scale[1])
+    if clip:
+       cmd = cmd + "--clip {} {} {} {} ".format(clip[0],clip[1],clip[2],clip[3])
+    if shape:
+       cmd = cmd + "--shape {} ".format(shape)
+    if overlap:
+       cmd = cmd + "--overlap "
+    if zipFlag: 
+       cmd = cmd + "--zip "
+    if leave:
+       cmd = cmd + "--leave "
+    if thresh != 0.4:
+       cmd = cmd + "--black {} ".format(thresh)
+    if font != 24:
+       cmd = cmd + "--magnify {} ".format(font)
+    if quick:
+       cmd = cmd + "--quick "
+    if amp:
+       cmd = cmd + "--amp "
+    if hyp:
+       cmd = cmd + "--name {} ".format(hyp)
+    if keep:
+       cmd = cmd + "--keep {} ".format(keep)
+    if group:
+       cmd = cmd + "--group "
+  
+    if infiles:
+       for myfile in infiles:
+           cmd = cmd + myfile + " "
+       
+
+    logging.info("Command Run: {}".format(cmd))
+    logging.info(" ")
+    logging.info("Parameters for this run: {}")
+    logging.info("    output name               : {} ".format(outfile))
+    logging.info("    input files               : {} ".format(infiles))
+    logging.info("    path to input files       : {} ".format(path))
+    logging.info("    resolution                : {} ".format(res))
+    logging.info("    filter flag               : {} ".format(filter))
+    logging.info("    output type               : {} ".format(type))
+    logging.info("    dB to byte scaling        : {} ".format(scale))
+    logging.info("    clip to AOI flag          : {} ".format(clip))
+    logging.info("    shapefile name            : {} ".format(shape))
+    logging.info("    clip to overlap flag      : {} ".format(overlap))
+    logging.info("    zip flag                  : {} ".format(zipFlag))
+    logging.info("    leave intermediates       : {} ".format(leave))
+    logging.info("    black culling threshold   : {} ".format(thresh))
+    logging.info("    annotation font size      : {} ".format(font))
+    logging.info("    quick flag                : {} ".format(quick))
+    logging.info("    amplitude input flag      : {} ".format(amp))
+    logging.info("    hyp name of subscription  : {} ".format(hyp))
+    logging.info("    keep ascending/descending : {} ".format(keep))
+    logging.info("    group flag                : {} ".format(group))
+    logging.info("\n")
+
 
 def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
         scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
         font=24,quick=False,amp=False,hyp=None,keep=None,group=False):
 
     if outfile is not None:
-        logFile = "{}_run_stats.txt".format(outfile)
+        logFile = "{}_log.txt".format(outfile)
     else:
-        logFile = "run_stats.txt"
+        logFile = "run_log.txt"
         outfile = "animation"
     logging.basicConfig(filename=logFile,format='%(asctime)s - %(levelname)s - %(message)s',
                         datefmt='%m/%d/%Y %I:%M:%S %p',level=logging.DEBUG)
@@ -589,7 +655,9 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
 
     print "\n"
     logging.info("Starting run")
-    print "\n"
+
+    printParameters(outfile,infiles,path,res,filter,type,scale,clip,shape,overlap,zipFlag,
+                    leave,thresh,font,quick,amp,hyp,keep,group)
 
     if hyp:
         logging.info("Using Hyp3 subscription named {} to download input files".format(hyp))
@@ -597,9 +665,14 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
         api = API(username)
         api.login(password=password)
         download_products(api,sub_name=hyp)
-        zipFlag = True
         hyp = None
+        zipFlag = True
         path = "hyp3-products"
+
+    if zipFlag:
+        unzipFiles(path,"hyp3-products-unzipped")
+        zipFlag = False
+        path = "hyp3-products-unzipped"
 
     if group and (infiles is None or len(infiles)==0):
         # Make path into an absolute path
@@ -608,7 +681,7 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
                 root = os.getcwd()
                 path = os.path.join(root,path)
             else:
-                logging.error("ERROR: path {} is not a directory!")
+                logging.error("ERROR: path {} is not a directory!".format(path))
                 exit(1)
             logging.info("Data path is {}".format(path))
         else:
@@ -655,10 +728,6 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
     if not leave and group:
         for myfile in glob.glob("sorted_*"):
             shutil.rmtree(myfile)
-
-
-
-
 
 
 if __name__ == "__main__":
