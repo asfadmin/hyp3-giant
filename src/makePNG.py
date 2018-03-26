@@ -35,51 +35,68 @@ matplotlib.use('Agg')
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 
-def mkMovie(h5file):
-	source = h5py.File(h5file)
-	imgarray = source["recons"][()]
-	images = numpy.split(imgarray, imgarray.shape[0])
+def mkMovie(h5file,layer,mm=None):
+    source = h5py.File(h5file)
+    imgarray = source["{}".format(layer)][()]
+    images = numpy.split(imgarray, imgarray.shape[0])
 
-	mini = 0
-	maxi = 0
-	img_list = []
-	shape = (0,0)
-	for scene in images:
-		img = numpy.reshape(scene,scene.shape[1:])
-		img = img[:,~(numpy.all(numpy.isnan(img), axis=0))]
-		img = img[~(numpy.all(numpy.isnan(img), axis=1))]
-		
-		reduced = interpolation.zoom(img, .25, order=1)
-		if numpy.nanmin(reduced) < mini:
-			mini = numpy.nanmin(mstats.winsorize(reduced,limits=(.05,.05)))
-		if numpy.nanmax(reduced) > maxi:
-			maxi = numpy.nanmax(mstats.winsorize(reduced,limits=(.05,.05)))
-		img_list.append((img,reduced))
-		shape = img.shape
-		img = []
+    if mm is not None:
+        print "mm is {}, values are {} and {}".format(mm,mm[0],mm[1])
 
-	print "Scaling from %s to %s" % (mini, maxi)
 
-	for (i, images) in enumerate(img_list):
-		(fsimg, rsimg) = images
-#		Generates ordinary png
-#		mpimg.imsave('frame' + str(i).zfill(3) + '.png', rsimg, cmap='RdYlBu', vmin = mini,vmax = maxi,dpi=100) 
+    mini = 0
+    maxi = 0
+    img_list = []
+    shape = (0,0)
+    for scene in images:
+        img = numpy.reshape(scene,scene.shape[1:])
+        img = img[:,~(numpy.all(numpy.isnan(img), axis=0))]
+        img = img[~(numpy.all(numpy.isnan(img), axis=1))]
+	
+        reduced = interpolation.zoom(img, .25, order=1)
+         
+        if mm is None: 
+            if numpy.nanmin(reduced) < mini:
+                mini = numpy.nanmin(mstats.winsorize(reduced,limits=(.05,.05)))
+            if numpy.nanmax(reduced) > maxi:
+                maxi = numpy.nanmax(mstats.winsorize(reduced,limits=(.05,.05)))
 
-#		Writes Binary
-		fsimg.tofile('frame' + str(i).zfill(3) + '.flat')
+        img_list.append((img,reduced))
+        shape = img.shape
+        img = []
 
-#		Generates png with scalebar	
-		fig_im = plt.imshow(fsimg, cmap='RdYlBu',vmin=mini,vmax=maxi)
-		plt.colorbar(orientation = 'horizontal',shrink = .5,pad=.05)
-		plt.axis('off')
-		plt.savefig("frame" + str(i).zfill(3) + '.png', bbox_inches="tight")
-		plt.clf()
-		fsimg = []
-		rsing = []
+    if mm is not None:
+        mini = float(mm[0])
+        maxi = float(mm[1])
+
+    print "Scaling from %s to %s" % (mini, maxi)
+
+    filelist = []
+    for (i, images) in enumerate(img_list):
+        (fsimg, rsimg) = images
+
+        # Generates ordinary png
+#        mpimg.imsave('frame' + str(i).zfill(3) + '.png', rsimg, cmap='RdYlBu', vmin = mini,vmax = maxi,dpi=100) 
+
+        # Writes Binary
+        fsimg.tofile('frame' + str(i).zfill(3) + '.flat')
+
+        # Generates png with scalebar	
+        fig_im = plt.imshow(fsimg, cmap='RdYlBu',vmin=mini,vmax=maxi)
+        plt.colorbar(orientation = 'horizontal',shrink = .5,pad=.05)
+        plt.axis('off')
+        name = "{}_{}_{}.png".format(h5file.replace(".h5",""),layer,str(i).zfill(3))
+        plt.savefig(name, bbox_inches="tight")
+        plt.clf()
+        fsimg = []
+        rsimg = []
+        filelist.append(name)
+
+    return filelist
 
 def main():
  i = sys.argv[1]
- mkMovie(i)
+ mkMovie(i, layer='recons')
 
 if __name__ == "__main__":
   main()

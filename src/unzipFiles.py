@@ -15,9 +15,27 @@ def unzipFiles(path1,path2):
     for myfile in glob.glob("{}/*.zip".format(path1)):
         newDir = myfile.replace(".zip","")
         if not os.path.isdir(os.path.join(path2,os.path.basename(newDir))):
+
             print("    unzipping file {}".format(myfile))
-            zip_ref = zipfile.ZipFile(myfile,'r')
-            zip_ref.extractall(path2)
+            zip_ref = zipfile.ZipFile(myfile,'r')            
+            
+            # Look for a directory in the zip file
+            found_dir = False
+            
+            for f in zip_ref.namelist():
+                print f
+                if '/' in f:
+                    found_dir = True
+            
+            # If no directory is found, create one
+            if not found_dir:
+                tmpPath = os.path.join(path2,os.path.basename(newDir))
+                print "    creating directory {}".format(tmpPath) 
+                os.makedirs(tmpPath)
+                zip_ref.extractall(tmpPath)
+            else:
+                zip_ref.extractall(path2)
+
             zip_ref.close()
         else:
             print("    skipping file {}".format(myfile))

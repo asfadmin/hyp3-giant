@@ -108,7 +108,7 @@ def prepareHypFiles(path,hyp):
         sdate = myfile.split("_")[1]
 
         # Catch the case of S1TBX names
-        if not len(mdate)==15 or len(mdate)==8:
+        if not len(mdate)==15 and not len(mdate)==8:
             logging.info("mdate is not a date or date time {}".format(mdate))
             mdate = os.path.basename(myfile.split("_")[5])
             sdate = myfile.split("_")[6]
@@ -379,11 +379,11 @@ def toRaw(myfile):
     gdal.Translate(rawname,myfile,format="ENVI")
     return rawname
 
-def makeGeotiffFiles(h5File,params):
+def makeGeotiffFiles(h5File,dataName,params):
 
     # Open up the HDF5 file
     source = h5py.File("%s" % h5File)
-    imgarray = source["recons"][()]
+    imgarray = source["%s" % dataName][()]
     maxband = imgarray.shape[0]
     logging.info("Found %s bands to process" % maxband)
  
@@ -393,14 +393,27 @@ def makeGeotiffFiles(h5File,params):
     os.chdir("../Stack")
     
     # Get the entire date range
-    dateList = np.unique(params['mdate']+params['sdate'])
+    longList = np.unique(params['mdate']+params['sdate'])
+    dateList = []
+    for i in range(len(longList)):
+         dateList.append(longList[i][0:8])
+    dateList = np.unique(dateList)
     dateList.sort()
     logging.info("Datelist is {}".format(dateList))
     
     for cnt in range(maxband):
         logging.info("Processing band %s" % str(cnt + 1))
-        outFile = "{}_phase.raw".format(dateList[cnt])
-	cmd = 'gdal_translate -b {} -of ENVI HDF5:"{}"://recons {}'.format(cnt+1,h5File,outFile)
+        if dataName == 'recons':
+            if params['train']:
+                outFile = "{}_trn_gnt_phase.raw".format(dateList[cnt])
+            else:
+                outFile = "{}_gnt_phase.raw".format(dateList[cnt])
+        else: 
+            if params['train']:
+                outFile = "{}_trn_raw_phase.raw".format(dateList[cnt])
+            else: 
+                outFile = "{}_raw_phase.raw".format(dateList[cnt])
+	cmd = 'gdal_translate -b {} -of ENVI HDF5:"{}"://{} {}'.format(cnt+1,h5File,dataName,outFile)
 	execute(cmd)
       	newdata = np.fromfile(outFile,dtype=np.float32,count=-1)
         img = np.reshape(newdata,(y,x))
@@ -437,7 +450,10 @@ def fixFileNamesTrain(params):
             logging.warning("***********************************************************************************")
 
 def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
-                     path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None):
+                     path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
+                     rawFlag=False,mm=None):
+
+    print "procS1StackGIANT: Rawflag is {}".format(rawFlag)
 
     logging.info("Type of run is {}".format(type))
 
@@ -485,6 +501,7 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     params['type'] = type
     params['rxy'] = rxy
     params['nvalid'] = float(nvalid)
+    params['train'] = train
     params['filt'] = filt
 
     if utcTime is None:
@@ -573,31 +590,53 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         h5File = "NSBAS-PARAMS.h5"
     
     os.chdir("Stack")
-    makePNG.mkMovie(h5File)
+    filelist =  makePNG.mkMovie(h5File,"recons",mm=mm)
+    filelist.sort()
+    if rawFlag:
+        filelist2 = makePNG.mkMovie(h5File,"rawts",mm=mm)
+        filelist2.sort()
     
     # Get the entire date range
     dateList = np.unique(params['mdate']+params['sdate'])
     dateList.sort()
-    filelist = glob.glob("frame*.png")
-    filelist.sort()
 
     # Add annotations to files 
-    name = "{}.gif".format(output)
     cnt = 0
     for myfile in filelist:
-        execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}.png".format(FILE=myfile,DATE=dateList[cnt]))
+        execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}".format(FILE=myfile,DATE=dateList[cnt]))
         cnt = cnt + 1
-    execute("convert -delay 120 -loop 0 anno_frame*.png {}".format(name))
+    if train:
+        name = "{}_train.gif".format(output)
+    else:
+        name = "{}.gif".format(output)
+    # Make the animation
+    execute("convert -delay 120 -loop 0 anno_*.png {}".format(name))
+
+    if rawFlag:
+        for myfile in glob.glob("anno_*.png"):
+            os.remove(myfile)
+        cnt = 0
+        for myfile in filelist2:
+           execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}".format(FILE=myfile,DATE=dateList[cnt]))
+           cnt = cnt + 1
+        rawname = name.replace(".gif","_rawts.gif")
+        # Make the animation
+        execute("convert -delay 120 -loop 0 anno_*.png {}".format(rawname))
 
     # Get product directory ready
     os.chdir("..")
     prodDir = "PRODUCT_{}".format(output)
     createCleanDir(prodDir)
 
-    # Make the animation
     os.chdir("Stack")    
+
     shutil.move(name,"../{}".format(prodDir))
-    makeGeotiffFiles(h5File,params)
+    if rawFlag:
+        shutil.move(rawname,"../{}".format(prodDir))
+        
+    makeGeotiffFiles(h5File,"recons",params)
+    if rawFlag:
+       makeGeotiffFiles(h5File,"rawts",params)
 
     # Move files from Stack directory
     for myfile in glob.glob("*.tif"):
@@ -627,7 +666,9 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
 
 def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
                 path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
-                zipFlag=False,group=False):
+                zipFlag=False,group=False,rawFlag=False,mm=None):
+
+    print "printParameters: Rawflag is {}".format(rawFlag)
 
     cmd = "procS1StackGIANT.py "
     
@@ -657,7 +698,10 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
        cmd = cmd + "--zip "
     if group: 
        cmd = cmd + "--group "
-           
+    if rawFlag:
+       cmd = cmd + "--raw "
+    if mm:
+       cmd = cmd + "--minmax {} {} ".format(mm[0],mm[1])           
     cmd = cmd + "{} ".format(type)
     cmd = cmd + "{} ".format(output)
 
@@ -678,11 +722,13 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
     logging.info("    hyp name of subscription : {}".format(hyp))
     logging.info("    zip flag                 : {}".format(zipFlag))
     logging.info("    group flag               : {}".format(group))
+    logging.info("    raw time series flag     : {}".format(rawFlag))
+    logging.info("    min/max scale range      : {}".format(mm))
     logging.info("\n")
 
 def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
                      path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
-                     zipFlag=False,group=False):
+                     zipFlag=False,group=False,rawFlag=False,mm=None):
 
     logFile = "{}_log.txt".format(output)
     logging.basicConfig(filename=logFile,format='%(asctime)s - %(levelname)s - %(message)s',
@@ -693,8 +739,10 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
     logging.info("Starting run")
     print " "
 
+    print "procS1StackGroupsGIANT: Rawflag is {}".format(rawFlag)
+
     printParameters(type,output,descFile,rxy,nvalid,nsbas,filt,path,utcTime,heading,
-                   leave,train,hyp,zipFlag,group)
+                   leave,train,hyp,zipFlag,group,rawFlag,mm)
 
     if hyp:
         logging.info("Using Hyp3 subscription named {} to download input files".format(hyp))
@@ -747,12 +795,12 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
                 outfile = output + "_" + classes[i]
                 procS1StackGIANT(type,outfile,descFile=descFile,rxy=rxy,nvalid=nvalid,
                      nsbas=nsbas,filt=filt, path=mydir,utcTime=utcTime,heading=heading,
-                     leave=leave,train=train,hyp=hyp)
+                     leave=leave,train=train,hyp=hyp,rawFlag=rawFlag,mm=mm)
                 shutil.rmtree(mydir)
     else:
         procS1StackGIANT(type,output,descFile=descFile,rxy=rxy,nvalid=nvalid,nsbas=nsbas,
              filt=filt,path=path,utcTime=utcTime,heading=heading,leave=leave,train=train,
-             hyp=hyp)
+             hyp=hyp,rawFlag=rawFlag,mm=mm)
 
     if not leave:
         if group:
@@ -774,17 +822,20 @@ if __name__ == '__main__':
   parser.add_argument("-g","--group",action="store_true",help="Group files by time before processing")
   parser.add_argument("-i","--input",help="Name of the Hyp3 subscription to download for input files")
   parser.add_argument("-l","--leave",action="store_true",help="Leave intermediate files in place")
+  parser.add_argument("-m","--minmax",type=float,nargs=2,help='Minium and maximum scale for animations',metavar=('MIN', 'MAX'))
   parser.add_argument("-n","--nsbas",action="store_true",help='Run NSBAS inversion instead of SBAS')
   parser.add_argument("-p","--path",help='Path to input files')
-  parser.add_argument("-r","--rxy",type=float,nargs=2,help='Set the point to use as zero; Default is choosen by ISCE')
+  parser.add_argument("-r","--rxy",type=float,nargs=2,help='Set the point to use as zero; Default is chosen by ISCE',metavar=('X', 'Y'))
   parser.add_argument("-s","--heading",type=float,help='Spacecraft heading at time of acquisitions')
   parser.add_argument("-t","--train",action="store_true",help="Run TRAIN weather model correction prior to time series inversion")
   parser.add_argument("-u","--utc",type=float,help='UTC time of image stack')
   parser.add_argument("-v","--nvalid",type=float,default=0.8,help='Fraction of samples that must be valid for a point to be included for NSBAS inversion.  (Default=0.8)')
+  parser.add_argument("-w","--raw",action="store_true",help='Create animation and geotiffs of raw time series')
   parser.add_argument("-z","--zip",action='store_true',help="Start from hyp3 zip files instead of directories")
   args = parser.parse_args()
 
+  print "MAIN: Rawflag is {}".format(args.raw)
   procS1StackGroupsGIANT(args.type,args.output,descFile=args.desc,rxy=args.rxy,nvalid=args.nvalid,nsbas=args.nsbas,
                    filt=args.filter,path=args.path,utcTime=args.utc,heading=args.heading,leave=args.leave,
-                   train=args.train,hyp=args.input,zipFlag=args.zip,group=args.group)
+                   train=args.train,hyp=args.input,zipFlag=args.zip,group=args.group,rawFlag=args.raw,mm=args.minmax)
 
