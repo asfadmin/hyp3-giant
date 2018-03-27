@@ -15,7 +15,10 @@ def getTimes(path,filelist,filetype):
                 if filetype == 'rtc':
                     dt = os.path.basename(myfile).split("_")[4]
                 elif filetype == 'insar':
-                    dt = os.path.basename(myfile).split("-")[1]
+                    if myfile.startswith("S1A_") or myfile.startswith("S1B_"):
+                        dt = os.path.basename(myfile).split("_")[1]
+                    else:
+                        dt = os.path.basename(myfile).split("-")[1]
                 else:
                     logging.error("ERROR: Unknown type of file {}".format(filetype))
                     mexit(1)

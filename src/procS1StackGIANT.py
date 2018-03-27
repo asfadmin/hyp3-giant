@@ -104,8 +104,9 @@ def prepareHypFiles(path,hyp):
         ext = "_unw_phase.tif"
 
     for myfile in glob.glob("*/*{}".format(ext)):
-        mdate = os.path.basename(myfile.split("_")[0])
-        sdate = myfile.split("_")[1]
+        logging.info("Checking file {}".format(myfile))
+        mdate = os.path.basename(myfile).split("_")[0]
+        sdate = os.path.basename(myfile).split("_")[1]
 
         # Catch the case of S1TBX names
         if not len(mdate)==15 and not len(mdate)==8:
