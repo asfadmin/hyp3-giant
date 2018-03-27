@@ -12,7 +12,7 @@ if __name__ == '__main__':
                        xlim=[0,5005], ylim=[0, 6049],
                        rxlim = [2445,2455], rylim=[2225,2235],
                        latfile='', lonfile='', hgtfile='',
-                       inc = 29., cohth=0.2, chgendian='False',
+                       inc = 38.5, cohth=0.2, chgendian='False',
                        unwfmt='FLT', corfmt='FLT')
     g.writexml('data.xml')
 
