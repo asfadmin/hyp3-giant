@@ -454,8 +454,6 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
                      path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
                      rawFlag=False,mm=None):
 
-    print "procS1StackGIANT: Rawflag is {}".format(rawFlag)
-
     logging.info("Type of run is {}".format(type))
 
     if path is not None:
@@ -598,7 +596,11 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         filelist2.sort()
     
     # Get the entire date range
-    dateList = np.unique(params['mdate']+params['sdate'])
+    longList = np.unique(params['mdate']+params['sdate'])
+    dateList = []
+    for i in range(len(longList)):
+         dateList.append(longList[i][0:8])
+    dateList = np.unique(dateList)
     dateList.sort()
 
     # Add annotations to files 
@@ -669,8 +671,6 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
                 path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
                 zipFlag=False,group=False,rawFlag=False,mm=None):
 
-    print "printParameters: Rawflag is {}".format(rawFlag)
-
     cmd = "procS1StackGIANT.py "
     
     if descFile:
@@ -739,8 +739,6 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
     print "\n"
     logging.info("Starting run")
     print " "
-
-    print "procS1StackGroupsGIANT: Rawflag is {}".format(rawFlag)
 
     printParameters(type,output,descFile,rxy,nvalid,nsbas,filt,path,utcTime,heading,
                    leave,train,hyp,zipFlag,group,rawFlag,mm)
@@ -835,7 +833,6 @@ if __name__ == '__main__':
   parser.add_argument("-z","--zip",action='store_true',help="Start from hyp3 zip files instead of directories")
   args = parser.parse_args()
 
-  print "MAIN: Rawflag is {}".format(args.raw)
   procS1StackGroupsGIANT(args.type,args.output,descFile=args.desc,rxy=args.rxy,nvalid=args.nvalid,nsbas=args.nsbas,
                    filt=args.filter,path=args.path,utcTime=args.utc,heading=args.heading,leave=args.leave,
                    train=args.train,hyp=args.input,zipFlag=args.zip,group=args.group,rawFlag=args.raw,mm=args.minmax)
