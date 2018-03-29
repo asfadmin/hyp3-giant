@@ -56,10 +56,19 @@ def mkMovie(h5file,layer,mm=None):
         reduced = interpolation.zoom(img, .25, order=1)
          
         if mm is None: 
-            if numpy.nanmin(reduced) < mini:
-                mini = numpy.nanmin(mstats.winsorize(reduced,limits=(.05,.05)))
-            if numpy.nanmax(reduced) > maxi:
-                maxi = numpy.nanmax(mstats.winsorize(reduced,limits=(.05,.05)))
+            if layer == 'recons' or layer == 'rawts':
+                if numpy.nanmin(reduced) < mini:
+                    mini = numpy.nanmin(mstats.winsorize(reduced,limits=(.05,.05)))
+                if numpy.nanmax(reduced) > maxi:
+                    maxi = numpy.nanmax(mstats.winsorize(reduced,limits=(.05,.05)))
+            else:
+                reduced[numpy.isnan(reduced)] = 0
+                if numpy.nanmin(reduced) < mini:
+                    mini = numpy.nanmin(reduced)
+                if numpy.nanmax(reduced) > maxi:
+                    maxi = numpy.nanmax(reduced)
+                
+
 
         img_list.append((img,reduced))
         shape = img.shape
@@ -96,7 +105,7 @@ def mkMovie(h5file,layer,mm=None):
 
 def main():
  i = sys.argv[1]
- mkMovie(i, layer='recons')
+ mkMovie(i, layer='error')
 
 if __name__ == "__main__":
   main()
