@@ -63,8 +63,6 @@ if __name__ == "__main__":
                         datefmt='%m/%d/%Y %I:%M:%S %p',level=logging.DEBUG)
     logging.getLogger().addHandler(logging.StreamHandler())
 
-    print "\n"
     logging.info("Starting run")
-    print " "
 
     unzipFiles(args.path1,args.path2)

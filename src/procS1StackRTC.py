@@ -201,7 +201,7 @@ def fix_projections(filelist):
             zone2 = int(zone2[0])
 
             if zone1 != zone2:
-                print "Projections don't match... Reprojecting %s" % file2
+                logging.info("Projections don't match... Reprojecting %s" % file2)
                 if hemi == "N":
                     proj = ('EPSG:326%02d' % int(zone1))
                 else:
@@ -246,7 +246,7 @@ def cutStack(filelist,overlap,clip,shape,thresh):
 
 def findBestFit(filelist,clip):
 
-    print "got file list {}".format(filelist)
+    logging.debug("got file list {}".format(filelist))
 
     lon_min = clip[0]
     lat_max = clip[1]
@@ -255,8 +255,8 @@ def findBestFit(filelist,clip):
     wkt1 = "POLYGON ((%s %s, %s %s, %s %s, %s %s, %s %s))" % (lat_min,lon_min,lat_max,lon_min,lat_max,lon_max,lat_min,lon_max,lat_min,lon_min)
     poly0 = ogr.CreateGeometryFromWkt(wkt1)
     total_area = poly0.GetArea()
-    print "Bounding Box {}".format(poly0.ExportToWkt())
-    print "Total area is {}".format(total_area)
+    logging.info("Bounding Box {}".format(poly0.ExportToWkt()))
+    logging.info("Total area is {}".format(total_area))
 
     # Find location of best overlap with bounding box
     max_frac = 0.0
@@ -270,16 +270,16 @@ def findBestFit(filelist,clip):
 
         wkt2 = "POLYGON ((%s %s, %s %s, %s %s, %s %s, %s %s))" % (lat_min1,lon_min1,lat_max1,lon_min1,lat_max1,lon_max1,lat_min1,lon_max1,lat_min1,lon_min1)
 
-        print "{} Box {}".format(filelist[i],poly0.ExportToWkt())
+        logging.info("{} Box {}".format(filelist[i],poly0.ExportToWkt()))
         poly1 = ogr.CreateGeometryFromWkt(wkt2)
         intersect1 = poly0.Intersection(poly1)
       
-        print "{} Int {}".format(filelist[i],intersect1.ExportToWkt())
+        logging.info("{} Int {}".format(filelist[i],intersect1.ExportToWkt()))
         area1 = intersect1.GetArea()
-        print "area1 is %s" % area1
+        logging.info("area1 is %s" % area1)
     
         frac = area1 / total_area
-        print "Fraction is {}".format(frac)
+        logging.info("Fraction is {}".format(frac))
         if frac > max_frac:
             max_frac = frac
             max_file = filelist[i]
@@ -308,19 +308,19 @@ def getAscDesc(myxml):
 
 def getXmlFiles(filelist):
     dates = getDates(filelist)
-    print "Got dates {}".format(dates)
-    print "In directory {}".format(os.getcwd())
+    logging.debug("Got dates {}".format(dates))
+    logging.debug("In directory {}".format(os.getcwd()))
     newlist = []
     for date in dates:
         mydir = glob.glob("*{}*-rtc-gamma".format(date))[0]
         myfile = glob.glob("{}/*.iso.xml".format(mydir))[0]
-        print "looking for {}".format(myfile)
+        logging.debug("looking for {}".format(myfile))
         newlist.append(myfile)
     return(newlist)
  
 def cull_list_by_direction(filelist,direction):
     xmlFiles = getXmlFiles(filelist)
-    print "Got xmlfiles {}".format(xmlFiles)
+    logging.debug("Got xmlfiles {}".format(xmlFiles))
     newlist = []
     for i in range(len(filelist)):
         myfile = filelist[i]
@@ -337,6 +337,10 @@ def cull_list_by_direction(filelist,direction):
 def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
     scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
     font=24,quick=False,amp=False,keep=None):
+
+    logging.info("***********************************************************************************")
+    logging.info("                 STARTING RUN {}".format(outfile))
+    logging.info("***********************************************************************************")
 
     # Do some error checking and info printing
     types=['dB','sigma-byte','dB-byte','amp','power']
@@ -567,6 +571,10 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     if not leave:
         shutil.rmtree("TEMP")
 
+    logging.info("***********************************************************************************")
+    logging.info("                 END OF RUN {}".format(outfile))
+    logging.info("***********************************************************************************")
+
 
 def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
         scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
@@ -649,12 +657,10 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
     else:
         logFile = "run_log.txt"
         outfile = "animation"
-    logging.basicConfig(filename=logFile,format='%(asctime)s - %(levelname)s - %(message)s',
-                        datefmt='%m/%d/%Y %I:%M:%S %p',level=logging.DEBUG)
-    logging.getLogger().addHandler(logging.StreamHandler())
 
-    print "\n"
-    logging.info("Starting run")
+    logging.info("***********************************************************************************")
+    logging.info("                 STARTING RUN {}".format(outfile))
+    logging.info("***********************************************************************************")
 
     printParameters(outfile,infiles,path,res,filter,type,scale,clip,shape,overlap,zipFlag,
                     leave,thresh,font,quick,amp,hyp,keep,group)
@@ -691,13 +697,13 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
             filelist = glob.glob("{}/S1*.zip".format(path))
         else:
             filelist = []
-            print "Path is {}".format(path)
+            logging.debug("Path is {}".format(path))
             for myfile in os.listdir(path):
                 if os.path.isdir(os.path.join(path,myfile)):
                     filelist.append(myfile)
 
         if len(filelist)==0:
-            print "ERROR: Unable to find zip files"
+            logging.error("ERROR: Unable to find zip files")
             exit(1)
 
         classes, filelists = sortByTime(path,filelist,"rtc")
@@ -709,7 +715,7 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
                     thisDir = "../sorted_{}".format(classes[i])
                     inFile = "{}/{}".format(thisDir,os.path.basename(myfile))
                     outFile = "{}/{}".format(mydir,os.path.basename(myfile))
-                    print "Linking file {} to file {}".format(inFile,outFile)
+                    loging.debug("Linking file {} to file {}".format(inFile,outFile))
                     os.symlink(inFile,outFile)
                 output = outfile + "_" + classes[i]
 
@@ -728,6 +734,10 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
     if not leave and group:
         for myfile in glob.glob("sorted_*"):
             shutil.rmtree(myfile)
+
+    logging.info("***********************************************************************************")
+    logging.info("                 END OF RUN {}".format(outfile))
+    logging.info("***********************************************************************************")
 
 
 if __name__ == "__main__":
@@ -753,6 +763,14 @@ if __name__ == "__main__":
     group.add_argument("-s","--shape",type=str,metavar="shapefile",help="Clip output to shape file (mutually exclusive with -c)")
     group.add_argument("-v","--overlap",action="store_true",help="Clip files to common overlap.  Assumes files are already pixel aligned")
     args = parser.parse_args()
+
+    if args.outfile is not None:
+        logFile = "{}_log.txt".format(outfile)
+    else:
+        logFile = "run_log.txt"
+    logging.basicConfig(filename=logFile,format='%(asctime)s - %(levelname)s - %(message)s',
+                        datefmt='%m/%d/%Y %I:%M:%S %p',level=logging.DEBUG)
+    logging.getLogger().addHandler(logging.StreamHandler())
 
     procS1StackGroupsRTC(outfile=args.outfile,infiles=args.infile,path=args.path,res=args.res,filter=args.filter,
         type=args.type,scale=args.dBscale,clip=args.clip,shape=args.shape,overlap=args.overlap,zipFlag=args.zip,
