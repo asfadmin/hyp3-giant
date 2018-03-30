@@ -34,6 +34,7 @@ import matplotlib
 matplotlib.use('Agg') 
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+import logging
 
 def mkMovie(h5file,layer,mm=None):
     source = h5py.File(h5file)
@@ -41,8 +42,7 @@ def mkMovie(h5file,layer,mm=None):
     images = numpy.split(imgarray, imgarray.shape[0])
 
     if mm is not None:
-        print "mm is {}, values are {} and {}".format(mm,mm[0],mm[1])
-
+        logging.debug("mm is {}, values are {} and {}".format(mm,mm[0],mm[1]))
 
     mini = 0
     maxi = 0
@@ -56,19 +56,11 @@ def mkMovie(h5file,layer,mm=None):
         reduced = interpolation.zoom(img, .25, order=1)
          
         if mm is None: 
-            if layer == 'recons' or layer == 'rawts':
-                if numpy.nanmin(reduced) < mini:
-                    mini = numpy.nanmin(mstats.winsorize(reduced,limits=(.05,.05)))
-                if numpy.nanmax(reduced) > maxi:
-                    maxi = numpy.nanmax(mstats.winsorize(reduced,limits=(.05,.05)))
-            else:
-                reduced[numpy.isnan(reduced)] = 0
-                if numpy.nanmin(reduced) < mini:
-                    mini = numpy.nanmin(reduced)
-                if numpy.nanmax(reduced) > maxi:
-                    maxi = numpy.nanmax(reduced)
-                
-
+            reduced[numpy.isnan(reduced)] = 0
+            if numpy.min(reduced) < mini:
+                mini = numpy.min(reduced)
+            if numpy.max(reduced) > maxi:
+                maxi = numpy.max(reduced)
 
         img_list.append((img,reduced))
         shape = img.shape
@@ -78,7 +70,7 @@ def mkMovie(h5file,layer,mm=None):
         mini = float(mm[0])
         maxi = float(mm[1])
 
-    print "Scaling from %s to %s" % (mini, maxi)
+    logging.info("Scaling from %s to %s" % (mini, maxi))
 
     filelist = []
     for (i, images) in enumerate(img_list):
