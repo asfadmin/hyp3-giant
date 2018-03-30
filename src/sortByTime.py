@@ -44,7 +44,17 @@ def sortByTime(path,filelist,filetype):
     for i in range(len(newlist)):
         placed = False
         for j in range(len(classes)):
-            if abs(int(times[i])-int(classes[j])) < 9:
+            hour = int(times[i][0:2])
+            min = int(times[i][2:4])
+            sec = int(times[i][4:6])
+            secofday = (((hour*60)+min)*60)+sec 
+
+            chour = int(classes[j][0:2])
+            cmin = int(classes[j][2:4])
+            csec = int(classes[j][4:6])
+            csecofday = (((chour*60)+cmin)*60)+csec 
+            
+            if (abs(csecofday-secofday)%86400) < 9:
                 lists[j].append(newlist[i])
                 placed = True
                 break
@@ -81,9 +91,7 @@ if __name__ == "__main__":
                         datefmt='%m/%d/%Y %I:%M:%S %p',level=logging.DEBUG)
     logging.getLogger().addHandler(logging.StreamHandler())
 
-    print "\n"
     logging.info("Starting run")
-    print " "
 
     filelist = glob.glob("*.zip")
     filetype = "insar"
