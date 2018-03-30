@@ -104,7 +104,7 @@ def prepareHypFiles(path,hyp):
         ext = "_unw_phase.tif"
 
     for myfile in glob.glob("*/*{}".format(ext)):
-        logging.info("Checking file {}".format(myfile))
+        logging.debug("Checking file {}".format(myfile))
         mdate = os.path.basename(myfile).split("_")[0]
         sdate = os.path.basename(myfile).split("_")[1]
 
@@ -337,7 +337,7 @@ def makeLinks(params):
     root = "../DATA"
     for i in range(len(params['mdate'])):
         outName = "{}_{}_unw_phase.raw".format(params['mdate'][i][0:8],params['sdate'][i][0:8])
-        logging.info("Linking in file {} to {}".format(os.path.join(root,params['pFile'][i]),outName))
+        logging.debug("Linking in file {} to {}".format(os.path.join(root,params['pFile'][i]),outName))
         if not os.path.exists(outName):
             os.symlink(os.path.join(root,params['pFile'][i]),outName)
         else:
@@ -346,7 +346,7 @@ def makeLinks(params):
             logging.error("ERROR: Try using the --group switch to process your files as groups")
             exit(1)       
         outName = "{}_{}_corr.raw".format(params['mdate'][i][0:8],params['sdate'][i][0:8])
-        logging.info("Linking in file {} to {}".format(os.path.join(root,params['cFile'][i]),outName))
+        logging.debug("Linking in file {} to {}".format(os.path.join(root,params['cFile'][i]),outName))
         os.symlink(os.path.join(root,params['cFile'][i]),outName)
     os.chdir("..")
 
@@ -400,7 +400,7 @@ def makeGeotiffFiles(h5File,dataName,params):
          dateList.append(longList[i][0:8])
     dateList = np.unique(dateList)
     dateList.sort()
-    logging.info("Datelist is {}".format(dateList))
+    logging.debug("Datelist is {}".format(dateList))
     
     for cnt in range(maxband):
         logging.info("Processing band %s" % str(cnt + 1))
@@ -409,11 +409,17 @@ def makeGeotiffFiles(h5File,dataName,params):
                 outFile = "{}_trn_gnt_phase.raw".format(dateList[cnt])
             else:
                 outFile = "{}_gnt_phase.raw".format(dateList[cnt])
-        else: 
+        elif dataName == 'rawts': 
             if params['train']:
                 outFile = "{}_trn_raw_phase.raw".format(dateList[cnt])
             else: 
                 outFile = "{}_raw_phase.raw".format(dateList[cnt])
+        elif dataName == 'error': 
+            if params['train']:
+                outFile = "{}_trn_error_phase.raw".format(dateList[cnt])
+            else: 
+                outFile = "{}_error_phase.raw".format(dateList[cnt])
+
 	cmd = 'gdal_translate -b {} -of ENVI HDF5:"{}"://{} {}'.format(cnt+1,h5File,dataName,outFile)
 	execute(cmd)
       	newdata = np.fromfile(outFile,dtype=np.float32,count=-1)
@@ -452,8 +458,11 @@ def fixFileNamesTrain(params):
 
 def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
                      path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
-                     rawFlag=False,mm=None):
+                     rawFlag=False,mm=None,errorFlag=False):
 
+    logging.info("***********************************************************************************")
+    logging.info("                 STARTING RUN {}".format(output))
+    logging.info("***********************************************************************************")
     logging.info("Type of run is {}".format(type))
 
     if path is not None:
@@ -466,7 +475,7 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         logging.info("Data path is {}".format(path))
 
     templateDir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, "etc")) 
-    logging.info("Looking for templates in %s" % templateDir)
+    logging.debug("Looking for templates in %s" % templateDir)
 
     if type == 'hyp':
         descFile,hypDir = prepareHypFiles(path,hyp)
@@ -519,7 +528,7 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
 
     logging.info("Examining list of files to process...")
     for i in range(len(params['mdate'])):
-        logging.info("    found: {} {} {} {}".format(params['mdate'][i],params['sdate'][i],params['pFile'][i],params['cFile'][i]))
+        logging.debug("    found: {} {} {} {}".format(params['mdate'][i],params['sdate'][i],params['pFile'][i],params['cFile'][i]))
 
     if type == 'custom':
         prepareCustomFiles(params,path)
@@ -579,20 +588,30 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
 
     if nsbas == False:
         logging.info("Running SBAS inversion")
-        execute("SBASInvert.py")
-        logging.info("Use plotts.py -f Stack/LS-PARAMS.h5 -y -30 10 to view results")
-        h5File = "LS-PARAMS.h5"
+        if errorFlag:
+            execute("SBASxval.py")
+            h5File = "LS-xval.h5"
+        else:
+            execute("SBASInvert.py")
+            h5File = "LS-PARAMS.h5"
     else:
         logging.info("Running NSBAS inversion")
-        execute("NSBASInvert.py")
-        logging.info("Use plotts.py -f Stack/NSBAS-PARAMS.h5 -y -30 10 to view results")
-        h5File = "NSBAS-PARAMS.h5"
+        if errorFlag:
+            h5File = "NSBAS-xval.h5"
+            execute("NSBASxval.py -o {}".format(h5file))
+        else:
+            execute("NSBASInvert.py")
+            h5File = "NSBAS-PARAMS.h5"
     
     os.chdir("Stack")
     filelist =  makePNG.mkMovie(h5File,"recons",mm=mm)
     filelist.sort()
+
     if rawFlag:
         filelist2 = makePNG.mkMovie(h5File,"rawts",mm=mm)
+        filelist2.sort()
+    elif errorFlag:
+        filelist2 = makePNG.mkMovie(h5File,"error",mm=mm)
         filelist2.sort()
     
     # Get the entire date range
@@ -625,6 +644,16 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         rawname = name.replace(".gif","_rawts.gif")
         # Make the animation
         execute("convert -delay 120 -loop 0 anno_*.png {}".format(rawname))
+    elif errorFlag:
+        for myfile in glob.glob("anno_*.png"):
+            os.remove(myfile)
+        cnt = 0
+        for myfile in filelist2:
+           execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}".format(FILE=myfile,DATE=dateList[cnt]))
+           cnt = cnt + 1
+        rawname = name.replace(".gif","_error.gif")
+        # Make the animation
+        execute("convert -delay 120 -loop 0 anno_*.png {}".format(rawname))
 
     # Get product directory ready
     os.chdir("..")
@@ -634,12 +663,14 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     os.chdir("Stack")    
 
     shutil.move(name,"../{}".format(prodDir))
-    if rawFlag:
+    if rawFlag or errorFlag:
         shutil.move(rawname,"../{}".format(prodDir))
         
     makeGeotiffFiles(h5File,"recons",params)
     if rawFlag:
        makeGeotiffFiles(h5File,"rawts",params)
+    elif errorFlag:
+       makeGeotiffFiles(h5File,"error",params)
 
     # Move files from Stack directory
     for myfile in glob.glob("*.tif"):
@@ -648,12 +679,12 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     os.chdir("..")
 
     # Move files from main directory 
-    os.mkdir("{}/GIAnT_FILES".format(prodDir))
-    shutil.move("prepdataxml.py","{}/GIAnT_FILES".format(prodDir))
-    shutil.move("prepbasxml.py","{}/GIAnT_FILES".format(prodDir))
-    shutil.move("userfn.py","{}/GIAnT_FILES".format(prodDir))
-    shutil.move("ifg.list","{}/GIAnT_FILES".format(prodDir))
-    shutil.move("example.rsc","{}/GIAnT_FILES".format(prodDir))
+#    os.mkdir("{}/GIAnT_FILES".format(prodDir))
+#    shutil.move("prepdataxml.py","{}/GIAnT_FILES".format(prodDir))
+#    shutil.move("prepbasxml.py","{}/GIAnT_FILES".format(prodDir))
+#    shutil.move("userfn.py","{}/GIAnT_FILES".format(prodDir))
+#    shutil.move("ifg.list","{}/GIAnT_FILES".format(prodDir))
+#    shutil.move("example.rsc","{}/GIAnT_FILES".format(prodDir))
     shutil.copy(descFile,prodDir)
 
     if not leave:
@@ -663,13 +694,28 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         shutil.rmtree("LINKS")
         shutil.rmtree("Stack")
         shutil.rmtree("Figs")
+
         os.remove("data.xml")
         os.remove("userfn.pyc")
         os.remove("sbas.xml")
+	os.remove("prepdataxml.py")
+	os.remove("prepbasxml.py")
+	os.remove("userfn.py")
+	os.remove("ifg.list")
+	os.remove("example.rsc")
+       
+        if train:
+            for myfile in glob.glob("merra/*/*.xyz"):
+                 os.remove(myfile)
+   
+    logging.info("***********************************************************************************")
+    logging.info("                 END OF RUN {}".format(output))
+    logging.info("***********************************************************************************")
+
 
 def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
                 path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
-                zipFlag=False,group=False,rawFlag=False,mm=None):
+                zipFlag=False,group=False,rawFlag=False,mm=None,errorFlag=False):
 
     cmd = "procS1StackGIANT.py "
     
@@ -702,7 +748,10 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
     if rawFlag:
        cmd = cmd + "--raw "
     if mm:
-       cmd = cmd + "--minmax {} {} ".format(mm[0],mm[1])           
+       cmd = cmd + "--minmax {} {} ".format(mm[0],mm[1])
+    if errorFlag:
+       cmd = cmd + "--error "
+
     cmd = cmd + "{} ".format(type)
     cmd = cmd + "{} ".format(output)
 
@@ -711,7 +760,7 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
     logging.info("    type of run              : {}".format(type))
     logging.info("    output name              : {}".format(output))
     logging.info("    descriptor file          : {}".format(descFile))
-    logging.info("    regin x y                : {}".format(rxy))
+    logging.info("    region x y               : {}".format(rxy))
     logging.info("    nvalid                   : {}".format(nvalid))
     logging.info("    nsbas flag               : {}".format(nsbas))
     logging.info("    filter flag              : {}".format(filt))
@@ -725,23 +774,20 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
     logging.info("    group flag               : {}".format(group))
     logging.info("    raw time series flag     : {}".format(rawFlag))
     logging.info("    min/max scale range      : {}".format(mm))
+    logging.info("    error plotting           : {}".format(errorFlag))
     logging.info("\n")
 
 def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
                      path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
-                     zipFlag=False,group=False,rawFlag=False,mm=None):
+                     zipFlag=False,group=False,rawFlag=False,mm=None,errorFlag=False):
 
-    logFile = "{}_log.txt".format(output)
-    logging.basicConfig(filename=logFile,format='%(asctime)s - %(levelname)s - %(message)s',
-                        datefmt='%m/%d/%Y %I:%M:%S %p',level=logging.DEBUG)
-    logging.getLogger().addHandler(logging.StreamHandler())
+    logging.info("***********************************************************************************")
+    logging.info("                 STARTING RUN {}".format(output))
+    logging.info("***********************************************************************************")
 
-    print "\n"
-    logging.info("Starting run")
-    print " "
-
-    printParameters(type,output,descFile,rxy,nvalid,nsbas,filt,path,utcTime,heading,
-                   leave,train,hyp,zipFlag,group,rawFlag,mm)
+    printParameters(type,output,descFile=descFile,rxy=rxy,nvalid=nvalid,nsbas=nsbas,filt=filt,
+                path=path,utcTime=utcTime,heading=heading,leave=leave,train=train,hyp=hyp,
+                zipFlag=zipFlag,group=group,rawFlag=rawFlag,mm=mm,errorFlag=errorFlag)
 
     if hyp:
         logging.info("Using Hyp3 subscription named {} to download input files".format(hyp))
@@ -771,7 +817,6 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
             path = os.getcwd()
  
         filelist = []
-        print "Path is {}".format(path)
         for myfile in os.listdir(path):
             if os.path.isdir(os.path.join(path,myfile)):
                 filelist.append(myfile)
@@ -789,27 +834,28 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
                     thisDir = "../sorted_{}".format(classes[i])
                     inFile = "{}/{}".format(thisDir,os.path.basename(myfile))
                     outFile = "{}/{}".format(mydir,os.path.basename(myfile))
-                    logging.info("Linking file {} to {}".format(inFile,outFile))
+                    logging.debug("Linking file {} to {}".format(inFile,outFile))
                     os.symlink(inFile,outFile)
                 outfile = output + "_" + classes[i]
                 procS1StackGIANT(type,outfile,descFile=descFile,rxy=rxy,nvalid=nvalid,
                      nsbas=nsbas,filt=filt, path=mydir,utcTime=utcTime,heading=heading,
-                     leave=leave,train=train,hyp=hyp,rawFlag=rawFlag,mm=mm)
+                     leave=leave,train=train,hyp=hyp,rawFlag=rawFlag,mm=mm,errorFlag=errorFlag)
                 shutil.rmtree(mydir)
     else:
         procS1StackGIANT(type,output,descFile=descFile,rxy=rxy,nvalid=nvalid,nsbas=nsbas,
              filt=filt,path=path,utcTime=utcTime,heading=heading,leave=leave,train=train,
-             hyp=hyp,rawFlag=rawFlag,mm=mm)
+             hyp=hyp,rawFlag=rawFlag,mm=mm,errorFlag=errorFlag)
 
     if not leave:
         if group:
             for myfile in glob.glob("sorted_*"):
                 shutil.rmtree(myfile)
-        if train:
-            shutil.rmtree("merra")
+#        if train:
+#            shutil.rmtree("merra")
 
-
-
+    logging.info("***********************************************************************************")
+    logging.info("                 END OF RUN {}".format(output))
+    logging.info("***********************************************************************************")
 
 if __name__ == '__main__':
 
@@ -828,12 +874,23 @@ if __name__ == '__main__':
   parser.add_argument("-s","--heading",type=float,help='Spacecraft heading at time of acquisitions')
   parser.add_argument("-t","--train",action="store_true",help="Run TRAIN weather model correction prior to time series inversion")
   parser.add_argument("-u","--utc",type=float,help='UTC time of image stack')
-  parser.add_argument("-v","--nvalid",type=float,default=0.8,help='Fraction of samples that must be valid for a point to be included for NSBAS inversion.  (Default=0.8)')
-  parser.add_argument("-w","--raw",action="store_true",help='Create animation and geotiffs of raw time series')
+  parser.add_argument("-v","--nvalid",type=float,default=0.8,
+      help='Fraction of samples that must be valid for a point to be included for NSBAS inversion.  (Default=0.8)')
   parser.add_argument("-z","--zip",action='store_true',help="Start from hyp3 zip files instead of directories")
+
+  group = parser.add_mutually_exclusive_group()
+  group.add_argument("-e","--error",action="store_true",help="Create animation and geotiffs of error estimates")
+  group.add_argument("-w","--raw",action="store_true",help='Create animation and geotiffs of raw time series')
+
   args = parser.parse_args()
+
+  logFile = "{}_log.txt".format(args.output)
+  logging.basicConfig(filename=logFile,format='%(asctime)s - %(levelname)s - %(message)s',
+                        datefmt='%m/%d/%Y %I:%M:%S %p',level=logging.DEBUG)
+  logging.getLogger().addHandler(logging.StreamHandler())
 
   procS1StackGroupsGIANT(args.type,args.output,descFile=args.desc,rxy=args.rxy,nvalid=args.nvalid,nsbas=args.nsbas,
                    filt=args.filter,path=args.path,utcTime=args.utc,heading=args.heading,leave=args.leave,
-                   train=args.train,hyp=args.input,zipFlag=args.zip,group=args.group,rawFlag=args.raw,mm=args.minmax)
+                   train=args.train,hyp=args.input,zipFlag=args.zip,group=args.group,rawFlag=args.raw,mm=args.minmax,
+                   errorFlag=args.error)
 
