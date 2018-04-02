@@ -110,7 +110,7 @@ def prepareHypFiles(path,hyp):
 
         # Catch the case of S1TBX names
         if not len(mdate)==15 and not len(mdate)==8:
-            logging.info("mdate is not a date or date time {}".format(mdate))
+            logging.debug("mdate is not a date or date time {}; reparsing".format(mdate))
             mdate = os.path.basename(myfile.split("_")[5])
             sdate = myfile.split("_")[6]
             
@@ -421,7 +421,7 @@ def makeGeotiffFiles(h5File,dataName,params):
                 outFile = "{}_error_phase.raw".format(dateList[cnt])
 
 	cmd = 'gdal_translate -b {} -of ENVI HDF5:"{}"://{} {}'.format(cnt+1,h5File,dataName,outFile)
-	execute(cmd)
+	execute(cmd,uselogging=True)
       	newdata = np.fromfile(outFile,dtype=np.float32,count=-1)
         img = np.reshape(newdata,(y,x))
         outFile = outFile.replace('.raw','.tif')
@@ -446,14 +446,12 @@ def prepareFilesForTrain(params):
 
 def fixFileNamesTrain(params):
     for i in range(len(params['pFile'])):
-        newfile = "{}/{}_{}_unw_phase_corrected.tif".format("TRAIN",params['mdate'][i],params['sdate'][i])
+        newfile = "{}/{}_{}_unw_phase_corrected.tif".format("TRAIN",params['mdate'][i][0:8],params['sdate'][i][0:8])
         if os.path.isfile(newfile):
             params['pFile'][i] = newfile
         else:
             logging.warning("***********************************************************************************")
-            logging.warning("***********************************************************************************")
             logging.warning("WARNING: can't find train output file {} - using uncorrected phase".format(newfile))
-            logging.warning("***********************************************************************************")
             logging.warning("***********************************************************************************")
 
 def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
@@ -482,10 +480,8 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     elif type == 'custom':
         if train:
             logging.warning("***********************************************************************************")
-            logging.warning("***********************************************************************************")
             logging.warning("WARNING: Unable to run TRAIN model on custom inputs")
             logging.warning("WARNING: Switching off TRAIN corrections")
-            logging.warning("***********************************************************************************")
             logging.warning("***********************************************************************************")
             train = False
         if descFile is None:
@@ -552,12 +548,15 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     resizeFiles(params)
 
     if train:
+        logging.info("***********************************************************************************")
+        logging.info("          PREPARING TO RUN THE TRAIN MERRA2 WEATHER MODEL")
+        logging.info("***********************************************************************************")
         createCleanDir("TRAIN")
         os.chdir("TRAIN")
         makeParmsAPS(params,root)
         prepareFilesForTrain(params)
         myfile = os.path.join(os.pardir,params['pFile'][0])
-        aps_weather_model("merra2",0,4,myfile)
+        aps_weather_model("merra2",1,4,myfile)
         os.chdir("..")
         fixFileNamesTrain(params) 
  
@@ -582,25 +581,25 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     makeLinks(params)
     fixPrepBasXml(params,templateDir)
 
-    execute("python prepdataxml.py")
-    execute("PrepIgramStack.py")
-    execute("python prepbasxml.py")
+    execute("python prepdataxml.py",uselogging=True)
+    execute("PrepIgramStack.py",uselogging=True)
+    execute("python prepbasxml.py",uselogging=True)
 
     if nsbas == False:
         logging.info("Running SBAS inversion")
         if errorFlag:
-            execute("SBASxval.py")
+            execute("SBASxval.py",uselogging=True)
             h5File = "LS-xval.h5"
         else:
-            execute("SBASInvert.py")
+            execute("SBASInvert.py",uselogging=True)
             h5File = "LS-PARAMS.h5"
     else:
         logging.info("Running NSBAS inversion")
         if errorFlag:
             h5File = "NSBAS-xval.h5"
-            execute("NSBASxval.py -o {}".format(h5file))
+            execute("NSBASxval.py -o {}".format(h5file),uselogging=True)
         else:
-            execute("NSBASInvert.py")
+            execute("NSBASInvert.py",uselogging=True)
             h5File = "NSBAS-PARAMS.h5"
     
     os.chdir("Stack")
@@ -625,35 +624,35 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     # Add annotations to files 
     cnt = 0
     for myfile in filelist:
-        execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}".format(FILE=myfile,DATE=dateList[cnt]))
+        execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}".format(FILE=myfile,DATE=dateList[cnt]),uselogging=True)
         cnt = cnt + 1
     if train:
         name = "{}_train.gif".format(output)
     else:
         name = "{}.gif".format(output)
     # Make the animation
-    execute("convert -delay 120 -loop 0 anno_*.png {}".format(name))
+    execute("convert -delay 120 -loop 0 anno_*.png {}".format(name),uselogging=True)
 
     if rawFlag:
         for myfile in glob.glob("anno_*.png"):
             os.remove(myfile)
         cnt = 0
         for myfile in filelist2:
-           execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}".format(FILE=myfile,DATE=dateList[cnt]))
+           execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}".format(FILE=myfile,DATE=dateList[cnt]),uselogging=True)
            cnt = cnt + 1
         rawname = name.replace(".gif","_rawts.gif")
         # Make the animation
-        execute("convert -delay 120 -loop 0 anno_*.png {}".format(rawname))
+        execute("convert -delay 120 -loop 0 anno_*.png {}".format(rawname),uselogging=True)
     elif errorFlag:
         for myfile in glob.glob("anno_*.png"):
             os.remove(myfile)
         cnt = 0
         for myfile in filelist2:
-           execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}".format(FILE=myfile,DATE=dateList[cnt]))
+           execute("convert {FILE} -gravity north  -annotate +0+5 '{DATE}' anno_{FILE}".format(FILE=myfile,DATE=dateList[cnt]),uselogging=True)
            cnt = cnt + 1
         rawname = name.replace(".gif","_error.gif")
         # Make the animation
-        execute("convert -delay 120 -loop 0 anno_*.png {}".format(rawname))
+        execute("convert -delay 120 -loop 0 anno_*.png {}".format(rawname),uselogging=True)
 
     # Get product directory ready
     os.chdir("..")
@@ -774,7 +773,7 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
     logging.info("    group flag               : {}".format(group))
     logging.info("    raw time series flag     : {}".format(rawFlag))
     logging.info("    min/max scale range      : {}".format(mm))
-    logging.info("    error plotting           : {}".format(errorFlag))
+    logging.info("    error estimation         : {}".format(errorFlag))
     logging.info("\n")
 
 def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
