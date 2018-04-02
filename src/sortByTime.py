@@ -54,7 +54,7 @@ def sortByTime(path,filelist,filetype):
             csec = int(classes[j][4:6])
             csecofday = (((chour*60)+cmin)*60)+csec 
             
-            if (abs(csecofday-secofday)%86400) < 9:
+            if (abs(csecofday-secofday)%86400) < 11:
                 lists[j].append(newlist[i])
                 placed = True
                 break
