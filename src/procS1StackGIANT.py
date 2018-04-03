@@ -50,6 +50,7 @@ from sortByTime import sortByTime
 from unzipFiles import unzipFiles
 from osgeo.gdalconst import *
 import logging
+import configparser
 from time_series_utils import *
 
 def prepareHypFiles(path,hyp):
@@ -714,7 +715,7 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
 
 def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
                 path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
-                zipFlag=False,group=False,rawFlag=False,mm=None,errorFlag=False):
+                zipFlag=False,group=False,rawFlag=False,mm=None,errorFlag=False,api_key=None):
 
     cmd = "procS1StackGIANT.py "
     
@@ -739,7 +740,7 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
     if train:
        cmd = cmd + "--train "
     if hyp:
-       cmd = cmd + "--input {} ".format(hyp)
+       cmd = cmd + '--input "{}" '.format(hyp)
     if zipFlag: 
        cmd = cmd + "--zip "
     if group: 
@@ -750,6 +751,8 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
        cmd = cmd + "--minmax {} {} ".format(mm[0],mm[1])
     if errorFlag:
        cmd = cmd + "--error "
+    if api_key:
+       cmd = cmd + "--apikey {} ".format(api_key)
 
     cmd = cmd + "{} ".format(type)
     cmd = cmd + "{} ".format(output)
@@ -774,11 +777,12 @@ def printParameters(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,fi
     logging.info("    raw time series flag     : {}".format(rawFlag))
     logging.info("    min/max scale range      : {}".format(mm))
     logging.info("    error estimation         : {}".format(errorFlag))
+    logging.info("    name of api-key file     : {}".format(api_key))
     logging.info("\n")
 
 def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,filt=0.1,
                      path=None,utcTime=None,heading=None,leave=False,train=False,hyp=None,
-                     zipFlag=False,group=False,rawFlag=False,mm=None,errorFlag=False):
+                     zipFlag=False,group=False,rawFlag=False,mm=None,errorFlag=False,api_key=None):
 
     logging.info("***********************************************************************************")
     logging.info("                 STARTING RUN {}".format(output))
@@ -786,13 +790,21 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
 
     printParameters(type,output,descFile=descFile,rxy=rxy,nvalid=nvalid,nsbas=nsbas,filt=filt,
                 path=path,utcTime=utcTime,heading=heading,leave=leave,train=train,hyp=hyp,
-                zipFlag=zipFlag,group=group,rawFlag=rawFlag,mm=mm,errorFlag=errorFlag)
+                zipFlag=zipFlag,group=group,rawFlag=rawFlag,mm=mm,errorFlag=errorFlag,
+                api_key=api_key)
 
     if hyp:
         logging.info("Using Hyp3 subscription named {} to download input files".format(hyp))
-        username,password = getUsernamePassword()
-        api = API(username)
-        api.login(password=password)
+        if api_key is not None:
+            config = configparser.ConfigParser()
+            config.read(api_key)
+            s = 'hyp3-API-credentials'
+            api = API(config.get(s, 'username'), api_key=config.get(s, 'api_key'))
+        
+        else:
+            username,password = getUsernamePassword()
+            api = API(username)
+            api.login(password=password)
         download_products(api,sub_name=hyp)
         zipFlag = True
         path = "hyp3-products"
@@ -849,8 +861,6 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
         if group:
             for myfile in glob.glob("sorted_*"):
                 shutil.rmtree(myfile)
-#        if train:
-#            shutil.rmtree("merra")
 
     logging.info("***********************************************************************************")
     logging.info("                 END OF RUN {}".format(output))
@@ -861,6 +871,7 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser(prog='procS1StackGIANT.py',description='Run a stack of interferograms through GIANT')
   parser.add_argument("type",choices=['hyp','custom'],help='Type of input files')
   parser.add_argument("output",help='Basename to be used for output files')
+  parser.add_argument("-a","--apikey",help='Use api-key found in given file to login. Default is to login with netrc credentials')
   parser.add_argument("-d","--desc",help='Name of descriptor file')
   parser.add_argument("-f","--filter",type=float,default=0.1,help='Filter length in years (Default=0.1)')
   parser.add_argument("-g","--group",action="store_true",help="Group files by time before processing")
@@ -891,5 +902,5 @@ if __name__ == '__main__':
   procS1StackGroupsGIANT(args.type,args.output,descFile=args.desc,rxy=args.rxy,nvalid=args.nvalid,nsbas=args.nsbas,
                    filt=args.filter,path=args.path,utcTime=args.utc,heading=args.heading,leave=args.leave,
                    train=args.train,hyp=args.input,zipFlag=args.zip,group=args.group,rawFlag=args.raw,mm=args.minmax,
-                   errorFlag=args.error)
+                   errorFlag=args.error,api_key=args.apikey)
 
