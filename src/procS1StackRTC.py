@@ -95,15 +95,6 @@ def pwr2amp(fi):
     saa.write_gdal_file_float(outfile,trans,proj,ampdata)
     return(outfile)
 
-def amp2pwr(filelist):
-    for i in range(len(filelist)):
-        x,y,trans,proj,data = saa.read_gdal_file(saa.open_gdal_file(filelist[i]))
-        pwrdata = data*data
-        outfile = filelist[i].replace(".tif","_amp.tif")
-        saa.write_gdal_file_float(outfile,trans,proj,pwrdata)
-        filelist[i] = outfile
-    return(filelist)
-
 def byteScale(fi,lower,upper):
     outfile = fi.replace('.tif','%s_%s.tif' % (int(lower),int(upper)))
     (x,y,trans,proj,data) = saa.read_gdal_file(saa.open_gdal_file(fi))
@@ -336,7 +327,7 @@ def cull_list_by_direction(filelist,direction):
 
 def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
     scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-    font=24,quick=False,amp=False,keep=None):
+    font=24,keep=None,aws=None):
 
     logging.info("***********************************************************************************")
     logging.info("                 STARTING RUN {}".format(outfile))
@@ -440,24 +431,14 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     if keep is not None and infiles is None :
         filelist = cull_list_by_direction(filelist,keep)
 
-    if amp:
-        filelist = amp2pwr(filelist)
-
-    if quick:
-        filelist = cutStack(filelist,overlap,clip,shape,thresh)
-        if len(filelist)!=0:
-            if filter:
-                filelist = filterStack(filelist)
-            if res is not None:
-                filelist = changeResStack(filelist,res)
-        power_filelist = filelist
-    else:
+    filelist = cutStack(filelist,overlap,clip,shape,thresh)
+    if len(filelist)!=0:
         if filter:
             filelist = filterStack(filelist)
         if res is not None:
             filelist = changeResStack(filelist,res)
-        power_filelist = cutStack(filelist,overlap,clip,shape,thresh)
-
+    power_filelist = filelist
+        
     if len(power_filelist)==0:
         logging.error("ERROR: No images survived the clipping process.")
         if overlap:
@@ -578,7 +559,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
 
 def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
         scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-        font=24,quick=False,amp=False,hyp=None,keep=None,group=False):
+        font=24,hyp=None,keep=None,group=False,aws=None):
 
     cmd = "procS1StackRTC.py "
     if outfile:
@@ -603,14 +584,12 @@ def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,ty
        cmd = cmd + "--zip "
     if leave:
        cmd = cmd + "--leave "
+    if aws:
+       cmd = cmd + "--aws {} ".format(aws)
     if thresh != 0.4:
        cmd = cmd + "--black {} ".format(thresh)
     if font != 24:
        cmd = cmd + "--magnify {} ".format(font)
-    if quick:
-       cmd = cmd + "--quick "
-    if amp:
-       cmd = cmd + "--amp "
     if hyp:
        cmd = cmd + "--name {} ".format(hyp)
     if keep:
@@ -640,8 +619,6 @@ def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,ty
     logging.info("    leave intermediates       : {} ".format(leave))
     logging.info("    black culling threshold   : {} ".format(thresh))
     logging.info("    annotation font size      : {} ".format(font))
-    logging.info("    quick flag                : {} ".format(quick))
-    logging.info("    amplitude input flag      : {} ".format(amp))
     logging.info("    hyp name of subscription  : {} ".format(hyp))
     logging.info("    keep ascending/descending : {} ".format(keep))
     logging.info("    group flag                : {} ".format(group))
@@ -650,7 +627,7 @@ def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,ty
 
 def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
         scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-        font=24,quick=False,amp=False,hyp=None,keep=None,group=False):
+        font=24,hyp=None,keep=None,group=False,aws=None):
 
     if outfile is not None:
         logFile = "{}_log.txt".format(outfile)
@@ -663,7 +640,7 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
     logging.info("***********************************************************************************")
 
     printParameters(outfile,infiles,path,res,filter,type,scale,clip,shape,overlap,zipFlag,
-                    leave,thresh,font,quick,amp,hyp,keep,group)
+                    leave,thresh,font,hyp,keep,group,aws)
 
     if hyp:
         logging.info("Using Hyp3 subscription named {} to download input files".format(hyp))
@@ -721,15 +698,13 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
 
                 procS1StackRTC(outfile=output,infiles=infiles,path=mydir,res=res,filter=filter,
                     type=type,scale=scale,clip=None,shape=None,overlap=True,zipFlag=zipFlag,
-                    leave=leave,thresh=thresh,font=font,quick=quick,amp=amp,
-                    keep=keep)
+                    leave=leave,thresh=thresh,font=font,keep=keep,aws=aws)
 
                 shutil.rmtree(mydir)
     else:
         procS1StackRTC(outfile=outfile,infiles=infiles,path=path,res=res,filter=filter,
             type=type,scale=scale,clip=clip,shape=shape,overlap=overlap,zipFlag=zipFlag,
-            leave=leave,thresh=thresh,font=font,quick=quick,amp=amp,
-            keep=keep)
+            leave=leave,thresh=thresh,font=font,keep=keep,aws=aws)
 
     if not leave and group:
         for myfile in glob.glob("sorted_*"):
@@ -743,7 +718,6 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="procS1StackRTC.py",description="Create RTC time series")
     parser.add_argument("infile",nargs="*",help="Input tif filenames, if none given will work from hyp zip files")
-    parser.add_argument("-a","--amp",action="store_true",help="Input files are amplitude and not power")
     parser.add_argument("-b","--black",type=float,help="Fraction of black required to remove an image (def 0.4)",default=0.4)
     parser.add_argument("-d","--dBscale",nargs=2,metavar=('upper','lower'),type=float,help="Upper and lower dB for scaling (default -40 0)",default=[-40,0])
     parser.add_argument("-f","--filter",action='store_true',help="Apply speckle filtering")
@@ -751,10 +725,8 @@ if __name__ == "__main__":
     parser.add_argument("-k","--keep",choices=['a','d'],help="Switch to keep only ascending or descending images (default is to keep all)")
     parser.add_argument("-l","--leave",action="store_true",help="Leave intermediate files in place")
     parser.add_argument("-m","--magnify",type=int,help="Magnify (set) annotation font size (def 24)",default=24)
-    parser.add_argument("-n","--name",type=str,help="Name of the Hyp3 subscription to download for input files")
     parser.add_argument("-o","--outfile",help="Output animation filename")
     parser.add_argument("-p","--path",help="Path to the input files")
-    parser.add_argument("-q","--quick",action="store_true",help="Run in quick mode - perform clipping first, then filtering and resampling")
     parser.add_argument("-r","--res",type=float,help="Desired output resolution")
     parser.add_argument("-t","--type",choices=['dB','sigma-byte','dB-byte','amp','power'],help="Output type (default dB-byte)",default="dB-byte")
     parser.add_argument("-z","--zip",action='store_true',help="Start from hyp3 zip files instead of directories")
@@ -762,6 +734,9 @@ if __name__ == "__main__":
     group.add_argument("-c","--clip",type=float,metavar=('ULE','ULN','LRE','LRN'),nargs=4,help="Clip output to bounding box (ULE, ULN, LRE, LRN)")
     group.add_argument("-s","--shape",type=str,metavar="shapefile",help="Clip output to shape file (mutually exclusive with -c)")
     group.add_argument("-v","--overlap",action="store_true",help="Clip files to common overlap.  Assumes files are already pixel aligned")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-a","--aws",help="bucket name to read tif files from")
+    group.add_argument("-n","--name",type=str,help="Name of the Hyp3 subscription to download for input files")
     args = parser.parse_args()
 
     if args.outfile is not None:
@@ -774,6 +749,6 @@ if __name__ == "__main__":
 
     procS1StackGroupsRTC(outfile=args.outfile,infiles=args.infile,path=args.path,res=args.res,filter=args.filter,
         type=args.type,scale=args.dBscale,clip=args.clip,shape=args.shape,overlap=args.overlap,zipFlag=args.zip,
-        leave=args.leave,thresh=args.black,font=args.magnify,quick=args.quick,amp=args.amp,hyp=args.name,
-        keep=args.keep,group=args.group)
+        leave=args.leave,thresh=args.black,font=args.magnify,hyp=args.name,
+        keep=args.keep,group=args.group,aws=args.aws)
  
