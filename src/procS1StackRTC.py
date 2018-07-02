@@ -47,6 +47,7 @@ from os.path import expanduser
 import logging
 from time_series_utils import createCleanDir 
 from unzipFiles import unzipFiles 
+import boto3
 
 def apply_speckle_filter(fi):
     outfile = fi.replace('.tif','_sf.tif')
@@ -116,8 +117,10 @@ def changeRes(res,fi):
     dst = gdal.Translate(outfile,fi,xRes=res,yRes=res,resampleAlg="average")
     return(outfile)
 
-def cut(pt1,pt2,pt3,pt4,fi,thresh=0.4):
+def cut(pt1,pt2,pt3,pt4,fi,thresh=0.4,aws=None):
     outfile = fi.replace('.tif','_clipped.tif')
+    if aws is not None:
+	    outfile = os.path.basename(outfile)
     coords = (pt1,pt2,pt3,pt4)
     dst = gdal.Translate(outfile,fi,projWin=coords)
     x,y,trans,proj,data = saa.read_gdal_file(dst)
@@ -169,44 +172,49 @@ def changeResStack(filelist,res):
     return filelist
 
 
-def fix_projections(filelist):
+def fix_projections(filelist,aws,all_proj,all_pixsize,all_coords):
 
-    # Open file1, get projection and pixsize
-    (x,y,trans,proj,data) = saa.read_gdal_file(saa.open_gdal_file(filelist[0]))
-    pixsize = trans[1]
+    # Get projection and pixsize for first image
+    proj = all_proj[0]
+    pixsize = all_pixsize[0]
+   
+    reproj_list = []
 
     # Make sure that UTM projections match
     ptr = proj.find("UTM zone ")
     if ptr != -1:
         (zone1,hemi) = [t(s) for t,s in zip((int,str), re.search("(\d+)(.)",proj[ptr:]).groups())]
         for x in range(len(filelist)-1):
-            file2 = filelist[x+1]
 
-            # Open up file2, get projection 
-            dst2 = gdal.Open(file2)
-            p2 = dst2.GetProjection()
-
-            # Cut the UTM zone out of projection2 
+            # Get the UTM zone out of projection2 
+            p2 = all_proj[x+1]
             ptr = p2.find("UTM zone ")
             zone2 = re.search("(\d+)",p2[ptr:]).groups()
             zone2 = int(zone2[0])
 
+            # If zones are mismatched, then reproject
             if zone1 != zone2:
                 logging.info("Projections don't match... Reprojecting %s" % file2)
                 if hemi == "N":
                     proj = ('EPSG:326%02d' % int(zone1))
                 else:
                     proj = ('EPSG:327%02d' % int(zone1))
-                name = file2.replace(".tif","_reproj.tif")
-                gdal.Warp(name,file2,dstSRS=proj,xRes=pixsize,yRes=pixsize)
-                filelist[x+1] = name
-    return(filelist)
+                if aws is None:
+                    name = file2.replace(".tif","_reproj.tif")
+                    gdal.Warp(name,file2,dstSRS=proj,xRes=pixsize,yRes=pixsize)
+                    filelist[x+1] = name
+                else:
+                    reproj_list.append(proj)
+            elif aws is not None:
+                reproj_list.append(None)
+                    
+    return(filelist,reproj_list)
 
-def cutStack(filelist,overlap,clip,shape,thresh):
-    filelist = fix_projections(filelist)
+def cutStack(filelist,overlap,clip,shape,thresh,aws,all_proj,all_pixsize,all_coords):
+    filelist,reproj_list = fix_projections(filelist,aws,all_proj,all_pixsize,all_coords)
     if overlap:
         logging.info("Cutting files to common overlap")
-        power_filelist = cutGeotiffsByLine(filelist)
+        power_filelist = cutGeotiffsByLine(filelist,all_coords=all_coords,all_pixsize=all_pixsize)
     elif clip is not None:
         pt1 = clip[0]
         pt2 = clip[1]
@@ -217,7 +225,7 @@ def cutStack(filelist,overlap,clip,shape,thresh):
         logging.info("file name : percent overlap : result")
         power_filelist = []
         for i in range(len(filelist)):
-            myfile,frac = cut(pt1,pt2,pt3,pt4,filelist[i],thresh=thresh)
+            myfile,frac = cut(pt1,pt2,pt3,pt4,filelist[i],thresh=thresh,aws=aws)
             report_stats(filelist[i],myfile,frac)
             if myfile is not None:
                 power_filelist.append(myfile)
@@ -235,7 +243,30 @@ def cutStack(filelist,overlap,clip,shape,thresh):
     return power_filelist
 
 
-def findBestFit(filelist,clip):
+def read_metadata(filelist):
+   
+    all_proj = []
+    all_coords = [] 
+    all_pixsize = []
+    for i in range(len(filelist)):
+        logging.info("Reading metadata for {}".format(filelist[i]))
+        x,y,trans,proj = saa.read_gdal_file_geo(saa.open_gdal_file(filelist[i]))
+
+        lat_max = trans[3]
+        lat_min = trans[3] + y*trans[5]
+        lon_min = trans[0]
+        lon_max = trans[0] + x*trans[1]
+
+        coords = [lon_min,lat_max,lon_max,lat_min]
+	logging.debug("{}".format(coords))
+	
+        all_coords.append(coords)
+        all_proj.append(proj)
+        all_pixsize.append(trans[1])
+
+    return all_proj,all_coords,all_pixsize
+
+def findBestFit(filelist,clip,all_coords,all_proj,all_pixsize):
 
     logging.debug("got file list {}".format(filelist))
 
@@ -252,12 +283,12 @@ def findBestFit(filelist,clip):
     # Find location of best overlap with bounding box
     max_frac = 0.0
     for i in range(len(filelist)):
-        x,y,trans,proj = saa.read_gdal_file_geo(saa.open_gdal_file(filelist[i]))
+        coords = all_coords[i]
 
-        lat_max1 = trans[3]
-        lat_min1 = trans[3] + y*trans[5]
-        lon_min1 = trans[0]
-        lon_max1= trans[0] + x*trans[1]
+        lat_max1 = coords[1]
+        lat_min1 = coords[3]
+        lon_min1 = coords[0]
+        lon_max1 = coords[2]
 
         wkt2 = "POLYGON ((%s %s, %s %s, %s %s, %s %s, %s %s))" % (lat_min1,lon_min1,lat_max1,lon_min1,lat_max1,lon_max1,lat_min1,lon_max1,lat_min1,lon_min1)
 
@@ -287,6 +318,19 @@ def findBestFit(filelist,clip):
     tmp = filelist[0]
     filelist[0] = filelist[loc]
     filelist[loc] = tmp
+
+    tmp = all_proj[0]
+    all_proj[0] = all_proj[loc]
+    all_proj[loc] = tmp
+        
+    tmp = all_coords[0]
+    all_coords[0] = all_coords[loc]
+    all_coords[loc] = tmp
+    
+    tmp = all_pixsize[0]
+    all_pixsize[0] = all_pixsize[loc]
+    all_pixsize[loc] = tmp
+        
 
 def getAscDesc(myxml):
     with open(myxml) as f:
@@ -325,6 +369,38 @@ def cull_list_by_direction(filelist,direction):
             logging.info("    Discarding")
     return newlist 
 
+def aws_ls(bucket_name):
+    s3 = boto3.resource('s3')
+    if "/" in bucket_name:
+        short_bucket_name = os.path.dirname(bucket_name)
+        if bucket_name[-1] != '/':
+            bucket_name = bucket_name + "/"
+    else:
+        short_bucket_name = bucket_name 
+    logging.debug("Listing S3 bucket {}".format(short_bucket_name))
+    my_bucket = s3.Bucket('{}'.format(short_bucket_name))
+    file_list = []
+    for object in my_bucket.objects.all():
+        logging.info("Found object {}".format(object.key))
+        file_list.append(object.key)
+    return file_list
+
+def filter_file_list(file_list,subdir,ext):
+    new_list = []
+    logging.debug("Filtering file list with subdir {} and extension {}".format(subdir,ext))
+    for myfile in file_list:
+        logging.debug("....File is {}".format(myfile))
+        if subdir is not None:
+            if subdir in myfile and ext in myfile:
+                new_list.append(myfile)
+        else:
+            if ext in myfile and myfile.count('/') == 0:
+	        logging.debug("adding file {} to list".format(myfile))
+                new_list.append(myfile)
+    return new_list
+
+
+
 def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
     scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
     font=24,keep=None,aws=None):
@@ -346,7 +422,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         elif keep == 'd':
             logging.info("Keeping only descending images")
         else:
-            logging.error("ERROR: Unknown keep value {} - must be either 'a' or 'a'".format(keep))
+            logging.error("ERROR: Unknown keep value {} - must be either 'a' or 'b'".format(keep))
             exit(1)
 
     if shape is not None:
@@ -365,46 +441,51 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
             exit(1)
 
     # Make the path into an absolute path
-    if path is None:
-        path = os.getcwd()
-    else:
-        if path[0] != "/":
-            path = os.path.join(os.getcwd(),path)
-        if not os.path.isdir(path):
-            logging.error("ERROR: Unable to find directory {}".format(path))
-            exit(1)
+    if aws is None:
+        if path is None:
+            path = os.getcwd()
+        else:
+            if path[0] != "/":
+                path = os.path.join(os.getcwd(),path)
+            if not os.path.isdir(path):
+                logging.error("ERROR: Unable to find directory {}".format(path))
+                exit(1)
 
     createCleanDir("TEMP")
 
     filelist = []
+
     if infiles is None or len(infiles)==0:
-        infiles = None
-        if zipFlag:
-            logging.info("No input files given, using hyp3 zip files from {}".format(path))
-            unzipFiles(path,"TEMP")
-        else:
-            logging.info("No input files given, using already unzipped hyp3 files in {}".format(path))
-            os.chdir("TEMP")
-            for myfile in os.listdir(path):
-                if os.path.isdir(os.path.join(path,myfile)) and "m-rtc-" in myfile :
-                    os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
-            os.chdir("..")
+    	if aws is not None:
+    	    filelist = aws_ls(aws)
+    	    filelist = filter_file_list(filelist,path,'.tif')
+    	    for i in xrange(len(filelist)):
+    		filelist[i] = "/vsis3/" + aws + "/" + filelist[i]
+    	else:
+    	    infiles = None
+    	    if zipFlag:
+    		logging.info("No input files given, using hyp3 zip files from {}".format(path))
+    		unzipFiles(path,"TEMP")
+    	    else:
+    		logging.info("No input files given, using already unzipped hyp3 files in {}".format(path))
+    		os.chdir("TEMP")
+    		for myfile in os.listdir(path):
+    		    if os.path.isdir(os.path.join(path,myfile)) and "m-rtc-" in myfile :
+    			os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
+    		os.chdir("..")
 
-        # Now, get the actual list of files
-        os.chdir("TEMP")
-        filelist = glob.glob("*/*vv*.tif")
+    	    # Now, get the actual list of files
+    	    os.chdir("TEMP")
+    	    filelist = glob.glob("*/*vv*.tif")
 
-        # Older zip files don't unzip into their own directories!
-        filelist = filelist +  glob.glob("*vv*.tif")
+    	    # Older zip files don't unzip into their own directories!
+    	    filelist = filelist +  glob.glob("*vv*.tif")
 
-        if clip:
-            findBestFit(filelist,clip)
-        os.chdir("..") 
-
+    	    os.chdir("..") 
     else:
         logging.info("Infiles found; using them")
         for myfile in infiles:
-            if not os.path.isfile(myfile):
+            if aws is None and not os.path.isfile(myfile):
                 logging.error("ERROR: Can't find input file {}".format(myfile))
                 exit(1)
             if myfile[0] != "/":
@@ -415,23 +496,32 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         logging.error("ERROR: Found no files to process.")
         exit(1)
 
-    os.chdir("TEMP")
+    all_proj,all_coords,all_pixsize = read_metadata(filelist)
 
-    for i in range(len(filelist)):
-        if "/" in filelist[i]:
-            os.symlink(filelist[i],os.path.basename(filelist[i]))
-            filelist[i] = os.path.basename(filelist[i])
-        else:
-            if not os.path.isfile(filelist[i]):
-                os.symlink("../{}".format(filelist[i]),filelist[i])
+    # If we are clipping, make the image with the most overlap
+    # the first image in the lists.
+    if clip:
+         findBestFit(filelist,clip,all_coords,all_proj,all_pixsize)
+   
+    # If not using AWS bucket for input, then link in the files now.
+    os.chdir("TEMP")
+    if aws is None:
+        for i in range(len(filelist)):
+            if "/" in filelist[i]:
+                os.symlink(filelist[i],os.path.basename(filelist[i]))
+                filelist[i] = os.path.basename(filelist[i])
+            else:
+                if not os.path.isfile(filelist[i]):
+                    os.symlink("../{}".format(filelist[i]),filelist[i])
 
     logging.info("List of files to operate on")
     logging.info("{}".format(filelist))
 
-    if keep is not None and infiles is None :
+    if keep is not None and aws is None:
         filelist = cull_list_by_direction(filelist,keep)
 
-    filelist = cutStack(filelist,overlap,clip,shape,thresh)
+    logging.info("Cutting data stack")
+    filelist = cutStack(filelist,overlap,clip,shape,thresh,aws,all_proj,all_pixsize,all_coords)
     if len(filelist)!=0:
         if filter:
             filelist = filterStack(filelist)
@@ -474,7 +564,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     date_and_file = []
     for myfile in png_filelist:
         # If using hyp files, annotate with dates
-        if infiles is None:
+        if infiles is None and aws is None:
             newFile = "anno_{}".format(myfile)
             execute("convert {FILE} -pointsize {FONT} -gravity north -stroke '#000C' -strokewidth 2 -annotate +0+5 '{DATE}' -stroke none -fill white -annotate +0+5 '{DATE}' {FILE2}". format(FILE=myfile,FILE2=newFile,DATE=dates[cnt],FONT=font)) 
             os.remove(myfile)
@@ -657,50 +747,65 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
         zipFlag = False
         path = "hyp3-products-unzipped"
 
-    if group and (infiles is None or len(infiles)==0):
-        # Make path into an absolute path
-        if path is not None:
-            if path[0] != "/" and os.path.isdir(path):
-                root = os.getcwd()
-                path = os.path.join(root,path)
+    if group:
+        if aws is not None:
+            filelist = aws_ls(aws)
+            filelist = filter_file_list(filelist,path,'.tif')
+            for i in xrange(len(filelist)):
+                filelist[i] = "/vsis3/" + aws + "/" + filelist[i]
+		
+        elif (infiles is None or len(infiles)==0):
+            # Make path into an absolute path
+            if path is not None:
+                if path[0] != "/":
+                    root = os.getcwd()
+                    path = os.path.join(root,path)
+                if os.path.isdir(path):
+                    logging.error("ERROR: path {} is not a directory!".format(path))
+                    exit(1)
+                logging.info("Data path is {}".format(path))
             else:
-                logging.error("ERROR: path {} is not a directory!".format(path))
-                exit(1)
-            logging.info("Data path is {}".format(path))
-        else:
-            path = os.getcwd()
+                path = os.getcwd()
 
-        if zipFlag:
-            filelist = glob.glob("{}/S1*.zip".format(path))
-        else:
-            filelist = []
-            logging.debug("Path is {}".format(path))
-            for myfile in os.listdir(path):
-                if os.path.isdir(os.path.join(path,myfile)):
-                    filelist.append(myfile)
+            if zipFlag:
+                filelist = glob.glob("{}/S1*.zip".format(path))
+            else:
+                filelist = []
+                logging.debug("Path is {}".format(path))
+                for myfile in os.listdir(path):
+                    if os.path.isdir(os.path.join(path,myfile)):
+                        filelist.append(myfile)
 
         if len(filelist)==0:
-            logging.error("ERROR: Unable to find zip files")
+            logging.error("ERROR: Unable to find input files")
             exit(1)
 
         classes, filelists = sortByTime(path,filelist,"rtc")
+	logging.debug("aws is {}".format(aws))
         for i in range(len(classes)):
             if len(filelists[i])>2:
-                mydir = "DATA_{}".format(classes[i])
-                createCleanDir(mydir)
-                for myfile in filelists[i]:
-                    thisDir = "../sorted_{}".format(classes[i])
-                    inFile = "{}/{}".format(thisDir,os.path.basename(myfile))
-                    outFile = "{}/{}".format(mydir,os.path.basename(myfile))
-                    loging.debug("Linking file {} to file {}".format(inFile,outFile))
-                    os.symlink(inFile,outFile)
-                output = outfile + "_" + classes[i]
+
+                if aws is None:
+    		    time = classes[i]
+    		    mydir = "DATA_{}".format(classes[i])
+    		    logging.info("Making clean directory {}".format(mydir))
+    		    createCleanDir(mydir)
+    		    for myfile in filelists[i]:
+    			newfile = os.path.join(mydir,os.path.basename(myfile))
+    			logging.info("Linking file {} to {}".format(os.path.join(path,myfile),newfile))
+    			os.symlink(os.path.join(path,myfile),newfile)
+	        else:
+		    mydir = None
+		    infiles = filelists[i]
+                
+		output = outfile + "_" + classes[i]
 
                 procS1StackRTC(outfile=output,infiles=infiles,path=mydir,res=res,filter=filter,
                     type=type,scale=scale,clip=None,shape=None,overlap=True,zipFlag=zipFlag,
                     leave=leave,thresh=thresh,font=font,keep=keep,aws=aws)
 
-                shutil.rmtree(mydir)
+                if mydir is not None:
+                    shutil.rmtree(mydir)
     else:
         procS1StackRTC(outfile=outfile,infiles=infiles,path=path,res=res,filter=filter,
             type=type,scale=scale,clip=clip,shape=shape,overlap=overlap,zipFlag=zipFlag,
@@ -740,7 +845,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.outfile is not None:
-        logFile = "{}_log.txt".format(outfile)
+        logFile = "{}_log.txt".format(args.outfile)
     else:
         logFile = "run_log.txt"
     logging.basicConfig(filename=logFile,format='%(asctime)s - %(levelname)s - %(message)s',
