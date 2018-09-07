@@ -70,6 +70,18 @@ def sortByTime(path,filelist,filetype):
         for j in range(len(lists[i])):
             logging.info("    {}".format(os.path.basename(lists[i][j])))
 
+    # The following won't work for AWS files, but is required for INSAR time series!
+    if filetype == 'insar':
+        for i in range(len(classes)):		
+             time = classes[i]		
+             mydir = "sorted_{}".format(time)		
+             logging.info("Making clean directory {}".format(mydir))		
+             createCleanDir(mydir)		
+             for myfile in lists[i]:		
+                 newfile = os.path.join(mydir,os.path.basename(myfile))		
+                 logging.info("Linking file {} to {}".format(os.path.join(path,myfile),newfile))		
+                 os.symlink(os.path.join(path,myfile),newfile)
+
     logging.info("Done sorting files by time")
     return classes, lists
 
