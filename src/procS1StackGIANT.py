@@ -465,11 +465,12 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     logging.info("Type of run is {}".format(type))
 
     if path is not None:
-        if path[0] != "/" and os.path.isdir(path):
-            root = os.getcwd()
-            path = os.path.join(root,path)    
+        if os.path.isdir(path):
+            if path[0] != "/": 
+                root = os.getcwd()
+                path = os.path.join(root,path)    
         else:
-            logging.error("ERROR: path {} is not a directory!")
+            logging.error("ERROR: path {} is not a directory!".format(path))
             exit(1)
         logging.info("Data path is {}".format(path))
 
@@ -817,11 +818,12 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
     if type == 'hyp' and group:
         # Make path into an absolute path
         if path is not None:
-            if path[0] != "/" and os.path.isdir(path):
-                root = os.getcwd()
-                path = os.path.join(root,path)    
+            if os.path.isdir(path):
+                if path[0] != "/": 
+                    root = os.getcwd()
+                    path = os.path.join(root,path)    
             else:
-                logging.error("ERROR: path {} is not a directory!")
+                logging.error("ERROR: path {} is not a directory!".format(path))
                 exit(1)
             logging.info("Data path is {}".format(path))
         else:
