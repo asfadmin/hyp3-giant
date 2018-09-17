@@ -52,6 +52,7 @@ from osgeo.gdalconst import *
 import logging
 import configparser
 from time_series_utils import *
+from prepGIAnT import prepGIAnT
 
 def prepareHypFiles(path,hyp):
     hypDir = "HYP"
@@ -495,6 +496,9 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         if heading is None:
             logging.error("ERROR: Must specify a heading when using custom option")
             exit(1)
+    elif type == 'aria':
+        descFile,utcTime = prepGIAnT(intdir=path)
+        heading = 12.0
     else:
         logging.error("ERROR: Unknown processing type {}".format(type))
         exit(1)
@@ -539,12 +543,13 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
 
     logging.info("Cutting files...")
     os.chdir("DATA")
-    cutFiles(params['pFile'])
-    cutFiles(params['cFile'])
+    if type != 'aria':
+        cutFiles(params['pFile'])
+        cutFiles(params['cFile'])
 
-    for i in range(len(params['mdate'])):
-        params['pFile'][i] = params['pFile'][i].replace(".tif","_clip.tif")
-        params['cFile'][i] = params['cFile'][i].replace(".tif","_clip.tif")
+        for i in range(len(params['mdate'])):
+            params['pFile'][i] = params['pFile'][i].replace(".tif","_clip.tif")
+            params['cFile'][i] = params['cFile'][i].replace(".tif","_clip.tif")
 
     logging.info("Resizing files...")
     resizeFiles(params)
@@ -871,7 +876,7 @@ def procS1StackGroupsGIANT (type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=
 if __name__ == '__main__':
 
   parser = argparse.ArgumentParser(prog='procS1StackGIANT.py',description='Run a stack of interferograms through GIANT')
-  parser.add_argument("type",choices=['hyp','custom'],help='Type of input files')
+  parser.add_argument("type",choices=['hyp','custom','aria'],help='Type of input files')
   parser.add_argument("output",help='Basename to be used for output files')
   parser.add_argument("-a","--apikey",help='Use api-key found in given file to login. Default is to login with netrc credentials')
   parser.add_argument("-d","--desc",help='Name of descriptor file')
