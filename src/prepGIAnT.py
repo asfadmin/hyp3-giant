@@ -75,18 +75,21 @@ def make_descriptor_file(vrtdir):
 
 def unzip_file(infile):
 
-    zip_ref = zipfile.ZipFile(infile,'r')
-    string = zip_ref.namelist()
-    if "/" in string[0]:
-        print "File {} has a directory".format(infile)
-        zip_ref.extractall(".")
-        zip_ref.close()    
-    else:
-       print "File {} has no directory".format(infile)
-       dirname = infile.replace(".unw_geo.zip","") + "/merged"
-       os.makedirs(dirname)
-       zip_ref.extractall(dirname)
-       zip_ref.close()   
+    intdir = os.path.dirname(infile)
+    chkdir = infile.replace(".unw_geo.zip","")
+    if not os.path.isdir(chkdir):
+        zip_ref = zipfile.ZipFile(infile,'r')
+        string = zip_ref.namelist()
+        if "/" in string[0]:
+            print "File {} has a directory".format(infile)
+            zip_ref.extractall(intdir)
+            zip_ref.close()    
+        else:
+           print "File {} has no directory".format(infile)
+           dirname = os.path.join(intdir,infile.replace(".unw_geo.zip","")+"/merged")
+           os.makedirs(dirname)
+           zip_ref.extractall(dirname)
+           zip_ref.close()   
 
 
 def prepGIAnT(bbox=None,refpt=None,intdir=None):
@@ -101,7 +104,7 @@ def prepGIAnT(bbox=None,refpt=None,intdir=None):
 
     logging.info("Getting input file from directory {}".format(intdir))
 
-    for myfile in glob.glob("S1-IFG_*.zip"):
+    for myfile in glob.glob(os.path.join(intdir,"S1-IFG_*.zip")):
         unzip_file(myfile)
 
     # If no bounding box given, determine one
@@ -135,22 +138,12 @@ def prepGIAnT(bbox=None,refpt=None,intdir=None):
     else:
         os.mkdir(vrtdir)
 
-    ####Prepare ifg.list
-    ifglist=os.path.join(prepdir, 'ifg.list')
-    if os.path.exists(ifglist):
-        print("Deleting old {0}".format(ifglist))
-        os.remove(ifglist)
-
     #Crop cmd tmpl
-#    cmdunwtmpl  = 'gdal_translate -of ENVI -b 2 -projwin {0} {1} {2} {3}'.format(bbox[2], bbox[1], bbox[3], bbox[0])
-#    cmdcortmpl  = 'gdal_translate -of ENVI -b 1 -projwin {0} {1} {2} {3}'.format(bbox[2], bbox[1], bbox[3], bbox[0])
-
     cmdunwtmpl  = 'gdal_translate -b 2 -projwin {0} {1} {2} {3}'.format(bbox[2], bbox[1], bbox[3], bbox[0])
     cmdcortmpl  = 'gdal_translate -b 1 -projwin {0} {1} {2} {3}'.format(bbox[2], bbox[1], bbox[3], bbox[0])
 
     pairs = []
-    #####Get list of IFGS
-    fid = open(ifglist, 'w')
+    #####Cut out the interferograms
     for dirf in glob.glob(os.path.join(intdir, '*/merged/filt_topophase.unw.geo')):
         bname = os.path.dirname(dirf)
         vals = dirf.split(os.path.sep)
@@ -161,8 +154,6 @@ def prepGIAnT(bbox=None,refpt=None,intdir=None):
         tstamp = root.split('-')[2][9:15]
         vroot = master + '_' + slave
 
-        fid.write("{0}   {1}   0.0   S1\n".format(master,slave))
-
         ###Create crop vrt for cor file
         cmd = "{0}  {1} {2}".format(cmdcortmpl, os.path.abspath(os.path.join(bname, 'phsig.cor.geo.vrt')), os.path.join(vrtdir, vroot + '_cor.tif'),1)
         status = os.system(cmd)
@@ -170,15 +161,12 @@ def prepGIAnT(bbox=None,refpt=None,intdir=None):
             print(cmd)
             raise Exception('Error processing cor for {0} from dir {1}'.format(vroot, bname))
 
-
         ###Create crop vrt for unw file
         cmd = "{0}  {1} {2}".format(cmdunwtmpl, os.path.abspath(os.path.join(bname, 'filt_topophase.unw.geo.vrt')), os.path.join(vrtdir, vroot + '_unw.tif'),2)
         status = os.system(cmd)
         if status:
             print(cmd)
             raise Exception('Error processing cor for {0} from dir {1}'.format(vroot, bname))    
-
-    fid.close()
 
     #####Make the descriptor file
     make_descriptor_file(vrtdir)
@@ -192,89 +180,7 @@ def prepGIAnT(bbox=None,refpt=None,intdir=None):
     rdict['FILE_LENGTH'] = ds.RasterYSize
     rdict['HEADING_DEG'] = -12.0
     rdict['WAVELENGTH'] = 0.05546576
-
     rdict['CENTER_LINE_UTC'] = int(tstamp[0:2])*3600 + int(tstamp[2:4])*60 + int(tstamp[4:6])
-
-    ds = None
-
-    exampleRSC = os.path.join(prepdir, 'example.rsc')
-    if os.path.exists(exampleRSC):
-        print("Deleting old {0}".format(exampleRSC))
-        os.remove(exampleRSC)
-
-    
-    fid = open(exampleRSC, 'w')
-    for key, value in rdict.items():
-        fid.write('{0:20}       {1}\n'.format(key, value))
-    fid.close()
-
-    #######Create userfn.py
-    reldir = os.path.relpath(vrtdir, prepdir)
-    uspy = """
-#!/usr/bin/env python3
-import os 
-
-def makefnames(dates1, dates2, sensor):
-    dirname = '{0}'
-    root = os.path.join(dirname, dates1+'_'+dates2)
-    iname = root + '_unw.bin'
-    cname = root + '_cor.bin'
-    return iname, cname""".format(reldir)
-
-    fid = open(os.path.join(prepdir,'userfn.py'), 'w')
-    fid.write(uspy)
-    fid.close() 
-
-
-    ##########Create prepxml.py
-
-    xmlCode = """
-
-#!/usr/bin/env python3
-
-import tsinsar as ts
-import argparse
-import numpy as np
-
-if __name__ == '__main__':
-
-    ######Prepare the data.xml
-    g = ts.TSXML('data')
-    g.prepare_data_xml('example.rsc', proc='RPAC',
-                       xlim=[0,{0}], ylim=[0, {1}],
-                       rxlim = [{2},{3}], rylim=[{4},{5}],
-                       latfile='', lonfile='', hgtfile='',
-                       inc = 34., cohth=0.2, chgendian='False',
-                       unwfmt='GRD', corfmt='GRD')
-    g.writexml('data.xml')
-
-""".format(rdict['WIDTH'], rdict['FILE_LENGTH'],
-           refpix[1]-5, refpix[1]+5,   #Reference region in range
-           refpix[0]-5, refpix[0]+5)    #Reference region in azimuth
-
-    fid = open(os.path.join(prepdir, 'prepdataxml.py'),'w')
-    fid.write(xmlCode)
-    fid.close()
-   
-    ######Prepare the sbas.xml file
-    xmlCode  = """
-#!/usr/bin/env python3
-
-import tsinsar as ts
-import argparse
-import numpy as np
-
-if __name__ == '__main__':
-    g = ts.TSXML('params')
-    g. prepare_sbas_xml(nvalid = {0}, netramp=False, atmos='',
-                        demerr = False, uwcheck=False, regu=True,
-                        filt = 0.1)
-    g.writexml('sbas.xml')
-""".format(60)
-
-    fid = open(os.path.join(prepdir, 'prepsbasxml.py'), 'w')
-    fid.write(xmlCode)
-    fid.close()
 
     return("descriptor.txt",rdict['CENTER_LINE_UTC'])
 

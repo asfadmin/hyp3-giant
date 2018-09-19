@@ -261,22 +261,17 @@ def createIfgList(params):
         mdate = params['mdate'][i][0:8]
         sdate = params['sdate'][i][0:8]
         baseline = params['basel'][i]
-        f.write ("%s    %s    %s    S1A\n" % (mdate,sdate,baseline))         
+        f.write ("%s    %s    %s    S1\n" % (mdate,sdate,baseline)) 
     f.close() 
 
 
 def createExampleRSC(params):
-    os.chdir("DATA")
-    width,length,trans,proj = saa.read_gdal_file_geo(saa.open_gdal_file(params['pFile'][0]))
-    params['width'] = width
-    params['length'] = length
-    os.chdir("..")
     utctime = params['utctime']
     heading = params['heading']     
 
     f = open('example.rsc','w')
-    f.write("WIDTH             %s\n" % width)
-    f.write("FILE_LENGTH       %s\n" % length)
+    f.write("WIDTH             %s\n" % params['width'])
+    f.write("FILE_LENGTH       %s\n" % params['length'])
     f.write("WAVELENGTH        0.05546576\n")
     f.write("HEADING_DEG       %s\n" % heading)
     f.write("CENTER_LINE_UTC   %s\n" % utctime)
@@ -317,12 +312,12 @@ def fixUserfnPy(params,templateDir):
             out = "    dirname = '%s'\n" % cwd
             f.write(out)
         elif 'iname = ' in line:
-            out = "    tname = 'LINKS/%s_%s_unw_phase.raw' % (dates1,dates2)\n"
+            out = "    tname = 'DATA/%s_%s_unw_phase.raw' % (dates1,dates2)\n"
             f.write(out)
             out = "    iname = os.path.join(dirname,tname)\n"
             f.write(out)
         elif 'cname = ' in line:
-            out = "    tname = 'LINKS/%s_%s_corr.raw' % (dates1,dates2)\n"
+            out = "    tname = 'DATA/%s_%s_corr.raw' % (dates1,dates2)\n"
             f.write(out)
             out = "    cname = os.path.join(dirname,tname)\n"
             f.write(out)
@@ -332,30 +327,27 @@ def fixUserfnPy(params,templateDir):
     f.close()
 
       
-def makeLinks(params):
-    logging.info("Creating new LINKS directory")
-    createCleanDir("LINKS")
-    os.chdir("LINKS")
-    root = "../DATA"
+def renameFiles(params):
+    logging.info("Renaming files")
+    os.chdir("DATA")
     for i in range(len(params['mdate'])):
         outName = "{}_{}_unw_phase.raw".format(params['mdate'][i][0:8],params['sdate'][i][0:8])
-        logging.debug("Linking in file {} to {}".format(os.path.join(root,params['pFile'][i]),outName))
+        logging.debug("Copying file {} to {}".format(params['pFile'][i],outName))
         if not os.path.exists(outName):
-            os.symlink(os.path.join(root,params['pFile'][i]),outName)
+            shutil.copy(params['pFile'][i],outName)
         else:
-            logging.error("ERROR: You have two different interferograms with the same dates")
-            logging.error("ERROR: Only one inteferogram per date pair is allowed")
-            logging.error("ERROR: Try using the --group switch to process your files as groups")
-            exit(1)       
+            logging.warning("WARNING: You may have two different interferograms with the same dates")
+            logging.warning("WARNING: Only one inteferogram per date pair is allowed")
+            logging.warning("WARNING: Try using the --group switch to process your files as groups")
         outName = "{}_{}_corr.raw".format(params['mdate'][i][0:8],params['sdate'][i][0:8])
-        logging.debug("Linking in file {} to {}".format(os.path.join(root,params['cFile'][i]),outName))
-        os.symlink(os.path.join(root,params['cFile'][i]),outName)
+        logging.debug("Copying file {} to {}".format(params['cFile'][i],outName))
+        shutil.copy(params['cFile'][i],outName)
     os.chdir("..")
 
 
 def fixPrepBasXml(params,templateDir):
     template = '%s/prepbasxml_template.py' % templateDir
-    f = open('prepbasxml.py','w')
+    f = open('prepsbasxml.py','w')
     g = open(template)
     for line in g.readlines():
         if 'nvalid' in line:
@@ -579,18 +571,22 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
             os.remove(myfile)
         for myfile in glob.glob("*_resize.tif"):
             os.remove(myfile)
+
+    width,length,trans,proj = saa.read_gdal_file_geo(saa.open_gdal_file(params['pFile'][0]))
+    params['width'] = width
+    params['length'] = length
     os.chdir("..")
- 
+
     createIfgList(params)
     createExampleRSC(params)
     fixPrepDataXml(params,templateDir)
     fixUserfnPy(params,templateDir)
-    makeLinks(params)
     fixPrepBasXml(params,templateDir)
+    renameFiles(params)
 
     execute("python prepdataxml.py",uselogging=True)
     execute("PrepIgramStack.py",uselogging=True)
-    execute("python prepbasxml.py",uselogging=True)
+    execute("python prepsbasxml.py",uselogging=True)
 
     if nsbas == False:
         logging.info("Running SBAS inversion")
@@ -684,20 +680,13 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
     shutil.move(h5File,"../{}/{}.h5".format(prodDir,output))
     os.chdir("..")
 
-    # Move files from main directory 
-#    os.mkdir("{}/GIAnT_FILES".format(prodDir))
-#    shutil.move("prepdataxml.py","{}/GIAnT_FILES".format(prodDir))
-#    shutil.move("prepbasxml.py","{}/GIAnT_FILES".format(prodDir))
-#    shutil.move("userfn.py","{}/GIAnT_FILES".format(prodDir))
-#    shutil.move("ifg.list","{}/GIAnT_FILES".format(prodDir))
-#    shutil.move("example.rsc","{}/GIAnT_FILES".format(prodDir))
     shutil.copy(descFile,prodDir)
 
     if not leave:
         if type == 'hyp':
             shutil.rmtree(hypDir)
         shutil.rmtree("DATA")
-        shutil.rmtree("LINKS")
+#        shutil.rmtree("LINKS")
         shutil.rmtree("Stack")
         shutil.rmtree("Figs")
 
@@ -705,7 +694,7 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         os.remove("userfn.pyc")
         os.remove("sbas.xml")
 	os.remove("prepdataxml.py")
-	os.remove("prepbasxml.py")
+	os.remove("prepsbasxml.py")
 	os.remove("userfn.py")
 	os.remove("ifg.list")
 	os.remove("example.rsc")
