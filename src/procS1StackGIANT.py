@@ -341,7 +341,10 @@ def renameFiles(params):
             logging.warning("WARNING: Try using the --group switch to process your files as groups")
         outName = "{}_{}_corr.raw".format(params['mdate'][i][0:8],params['sdate'][i][0:8])
         logging.debug("Copying file {} to {}".format(params['cFile'][i],outName))
-        shutil.copy(params['cFile'][i],outName)
+        if not os.path.exists(outName):
+            shutil.copy(params['cFile'][i],outName)
+        else:  
+            logging.info("File exists; skipping")
     os.chdir("..")
 
 
