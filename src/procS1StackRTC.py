@@ -139,14 +139,18 @@ def getDates(filelist):
     dates = []
     for myfile in filelist:
         myfile = os.path.basename(myfile)
-        s = myfile.split("-")[4]
-        
-        if len(s) <= 26:
-            t = s.split("_")[0]
-            dates.append(t)
-        else:       
-            t = s.split("_")[4]
-            dates.append(t)
+        logging.debug("Getting date for file {}".format(myfile))
+        if "IW_RT" in myfile:
+            s = myfile.split("_")[3]
+            dates.append(s) 
+        else:
+            s = myfile.split("-")[4]
+            if len(s) <= 26:
+                t = s.split("_")[0]
+                dates.append(t)
+            else:       
+                t = s.split("_")[4]
+                dates.append(t)
             
     return(dates)
 
@@ -244,11 +248,13 @@ def cutStack(filelist,overlap,clip,shape,thresh,aws,all_proj,all_pixsize,all_coo
 
 
 def read_metadata(filelist):
-   
+    
+    os.chdir("TEMP")   
     all_proj = []
     all_coords = [] 
     all_pixsize = []
     for i in range(len(filelist)):
+        logging.debug("In directory {}".format(os.getcwd()))
         logging.info("Reading metadata for {}".format(filelist[i]))
         x,y,trans,proj = saa.read_gdal_file_geo(saa.open_gdal_file(filelist[i]))
 
@@ -264,6 +270,7 @@ def read_metadata(filelist):
         all_proj.append(proj)
         all_pixsize.append(trans[1])
 
+    os.chdir("..")   
     return all_proj,all_coords,all_pixsize
 
 def findBestFit(filelist,clip,all_coords,all_proj,all_pixsize):
@@ -470,13 +477,14 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     		logging.info("No input files given, using already unzipped hyp3 files in {}".format(path))
     		os.chdir("TEMP")
     		for myfile in os.listdir(path):
-    		    if os.path.isdir(os.path.join(path,myfile)) and "m-rtc-" in myfile :
+    		    if os.path.isdir(os.path.join(path,myfile)) and ("-rtc-" in myfile or "_RTC" in myfile):
     			os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
     		os.chdir("..")
 
     	    # Now, get the actual list of files
     	    os.chdir("TEMP")
     	    filelist = glob.glob("*/*vv*.tif")
+            filelist = filelist + glob.glob("*/*VV*.tif")
 
     	    # Older zip files don't unzip into their own directories!
     	    filelist = filelist +  glob.glob("*vv*.tif")
@@ -496,6 +504,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         logging.error("ERROR: Found no files to process.")
         exit(1)
 
+    logging.debug("In directory {}".format(os.getcwd()))
     all_proj,all_coords,all_pixsize = read_metadata(filelist)
 
     # If we are clipping, make the image with the most overlap
@@ -760,7 +769,7 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
                 if path[0] != "/":
                     root = os.getcwd()
                     path = os.path.join(root,path)
-                if os.path.isdir(path):
+                if not os.path.isdir(path):
                     logging.error("ERROR: path {} is not a directory!".format(path))
                     exit(1)
                 logging.info("Data path is {}".format(path))
