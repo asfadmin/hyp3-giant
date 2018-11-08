@@ -96,6 +96,13 @@ def pwr2amp(fi):
     saa.write_gdal_file_float(outfile,trans,proj,ampdata)
     return(outfile)
 
+def amp2pwr(fi):
+    x,y,trans,proj,data = saa.read_gdal_file(saa.open_gdal_file(fi))
+    pwrdata = data * data 
+    outfile = fi.replace(".tif","_pwr.tif")
+    saa.write_gdal_file_float(outfile,trans,proj,pwrdata)
+    return(outfile)
+
 def byteScale(fi,lower,upper):
     outfile = fi.replace('.tif','%s_%s.tif' % (int(lower),int(upper)))
     (x,y,trans,proj,data) = saa.read_gdal_file(saa.open_gdal_file(fi))
@@ -410,7 +417,7 @@ def filter_file_list(file_list,subdir,ext):
 
 def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
     scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-    font=24,keep=None,aws=None):
+    font=24,keep=None,aws=None,inamp=False):
 
     logging.info("***********************************************************************************")
     logging.info("                 STARTING RUN {}".format(outfile))
@@ -479,15 +486,25 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     		for myfile in os.listdir(path):
     		    if os.path.isdir(os.path.join(path,myfile)) and ("-rtc-" in myfile or "_RTC" in myfile):
     			os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
+                    elif os.path.isfile(os.path.join(path,myfile)) and ("RT" in myfile):
+    			os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
+
     		os.chdir("..")
 
     	    # Now, get the actual list of files
     	    os.chdir("TEMP")
     	    filelist = glob.glob("*/*vv*.tif")
             filelist = filelist + glob.glob("*/*VV*.tif")
+            if len(filelist) == 0:
+                filelist = glob.glob("*/*hh*.tif")
+                filelist = filelist + glob.glob("*/*HH*.tif")
 
     	    # Older zip files don't unzip into their own directories!
     	    filelist = filelist +  glob.glob("*vv*.tif")
+    	    filelist = filelist +  glob.glob("*VV*.tif")
+            if len(filelist) == 0:
+                filelist = filelist +  glob.glob("*hh*.tif")
+                filelist = filelist +  glob.glob("*HH*.tif")
 
     	    os.chdir("..") 
     else:
@@ -536,7 +553,14 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
             filelist = filterStack(filelist)
         if res is not None:
             filelist = changeResStack(filelist,res)
-    power_filelist = filelist
+ 
+    if not inamp:
+        power_filelist = filelist
+    else:
+        power_filelist = []
+        for myfile in filelist:
+            pwrfile = amp2pwr(myfile)
+            power_filelist.append(pwrfile)
         
     if len(power_filelist)==0:
         logging.error("ERROR: No images survived the clipping process.")
@@ -658,7 +682,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
 
 def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
         scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-        font=24,hyp=None,keep=None,group=False,aws=None):
+        font=24,hyp=None,keep=None,group=False,aws=None,inamp=False):
 
     cmd = "procS1StackRTC.py "
     if outfile:
@@ -695,6 +719,8 @@ def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,ty
        cmd = cmd + "--keep {} ".format(keep)
     if group:
        cmd = cmd + "--group "
+    if inamp:
+       cmd = cmd + "--inamp "
   
     if infiles:
        for myfile in infiles:
@@ -726,7 +752,7 @@ def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,ty
 
 def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
         scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-        font=24,hyp=None,keep=None,group=False,aws=None):
+        font=24,hyp=None,keep=None,group=False,aws=None,inamp=False):
 
     if outfile is not None:
         logFile = "{}_log.txt".format(outfile)
@@ -739,7 +765,7 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
     logging.info("***********************************************************************************")
 
     printParameters(outfile,infiles,path,res,filter,type,scale,clip,shape,overlap,zipFlag,
-                    leave,thresh,font,hyp,keep,group,aws)
+                    leave,thresh,font,hyp,keep,group,aws,inamp)
 
     if hyp:
         logging.info("Using Hyp3 subscription named {} to download input files".format(hyp))
@@ -811,14 +837,14 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
 
                 procS1StackRTC(outfile=output,infiles=infiles,path=mydir,res=res,filter=filter,
                     type=type,scale=scale,clip=None,shape=None,overlap=True,zipFlag=zipFlag,
-                    leave=leave,thresh=thresh,font=font,keep=keep,aws=aws)
+                    leave=leave,thresh=thresh,font=font,keep=keep,aws=aws,inamp=inamp)
 
                 if mydir is not None:
                     shutil.rmtree(mydir)
     else:
         procS1StackRTC(outfile=outfile,infiles=infiles,path=path,res=res,filter=filter,
             type=type,scale=scale,clip=clip,shape=shape,overlap=overlap,zipFlag=zipFlag,
-            leave=leave,thresh=thresh,font=font,keep=keep,aws=aws)
+            leave=leave,thresh=thresh,font=font,keep=keep,aws=aws,inamp=inamp)
 
     if not leave and group:
         for myfile in glob.glob("sorted_*"):
@@ -836,6 +862,7 @@ if __name__ == "__main__":
     parser.add_argument("-d","--dBscale",nargs=2,metavar=('upper','lower'),type=float,help="Upper and lower dB for scaling (default -40 0)",default=[-40,0])
     parser.add_argument("-f","--filter",action='store_true',help="Apply speckle filtering")
     parser.add_argument("-g","--group",action='store_true',help="Group files by time before processing into stacks.  Turns on overlap option.")
+    parser.add_argument("-i","--inamp",action='store_true',help="Input files are amplitude instead of power.")
     parser.add_argument("-k","--keep",choices=['a','d'],help="Switch to keep only ascending or descending images (default is to keep all)")
     parser.add_argument("-l","--leave",action="store_true",help="Leave intermediate files in place")
     parser.add_argument("-m","--magnify",type=int,help="Magnify (set) annotation font size (def 24)",default=24)
@@ -864,5 +891,5 @@ if __name__ == "__main__":
     procS1StackGroupsRTC(outfile=args.outfile,infiles=args.infile,path=args.path,res=args.res,filter=args.filter,
         type=args.type,scale=args.dBscale,clip=args.clip,shape=args.shape,overlap=args.overlap,zipFlag=args.zip,
         leave=args.leave,thresh=args.black,font=args.magnify,hyp=args.name,
-        keep=args.keep,group=args.group,aws=args.aws)
+        keep=args.keep,group=args.group,aws=args.aws,inamp=args.inamp)
  
