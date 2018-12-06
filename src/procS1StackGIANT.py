@@ -705,6 +705,8 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         if train:
             for myfile in glob.glob("merra/*/*.xyz"):
                  os.remove(myfile)
+    else:
+        shutil.move("DATA","DATA_{}".format(output))
    
     logging.info("***********************************************************************************")
     logging.info("                 END OF RUN {}".format(output))
