@@ -42,6 +42,7 @@ from cutGeotiffsByLine import cutGeotiffsByLine
 from sortByTime import sortByTime
 from download_products import download_products
 from getUsernamePassword import getUsernamePassword
+from enh_lee_filter import enh_lee
 from asf_hyp3 import API
 from os.path import expanduser
 import logging
@@ -50,29 +51,14 @@ from unzipFiles import unzipFiles
 import boto3
 
 def apply_speckle_filter(fi):
-    outfile = fi.replace('.tif','_sf.tif')
-    (x,y,trans,proj,data) = saa.read_gdal_file(saa.open_gdal_file(fi))
-    infile = "tmp.bin"
-    f = open(infile,"wb")
-    f.write(data)
-    f.close()
-    
-    cmd = "swap_bytes tmp.bin tmp2.bin 4"
-    execute(cmd)
-     
-    cmd = "enh_lee tmp2.bin tmp3.bin %s 1 4 7 7" % x
-    execute(cmd)
 
-    cmd = "swap_bytes tmp3.bin tmp4.bin 4"
-    execute(cmd)
-     
-    data = np.fromfile("tmp4.bin",dtype=np.float32)
-    data = np.reshape(data,(y,x))
+    outfile = fi.replace('.tif','_sf.tif')
+    looks = 4
+    size = 7
+    dampening_factor = 1
+    (x,y,trans,proj,img) = saa.read_gdal_file(saa.open_gdal_file(fi))
+    data = enh_lee(looks,size,dampening_factor,img)
     saa.write_gdal_file_float(outfile,trans,proj,data)
-    os.remove("tmp.bin")
-    os.remove("tmp2.bin")
-    os.remove("tmp3.bin")
-    os.remove("tmp4.bin")
     return(outfile)
 
 def create_dB(fi):
@@ -196,6 +182,7 @@ def fix_projections(filelist,aws,all_proj,all_pixsize,all_coords):
     if ptr != -1:
         (zone1,hemi) = [t(s) for t,s in zip((int,str), re.search("(\d+)(.)",proj[ptr:]).groups())]
         for x in range(len(filelist)-1):
+            file2 = filelist[x+1]
 
             # Get the UTM zone out of projection2 
             p2 = all_proj[x+1]
@@ -545,8 +532,11 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
 
     if keep is not None and aws is None:
         filelist = cull_list_by_direction(filelist,keep)
-
+        if len(filelist) == 0:
+            logging.error("All files have been culled by direction ({})".format(keep))
+            exit(1)
     logging.info("Cutting data stack")
+        
     filelist = cutStack(filelist,overlap,clip,shape,thresh,aws,all_proj,all_pixsize,all_coords)
     if len(filelist)!=0:
         if filter:
