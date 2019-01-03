@@ -39,9 +39,10 @@ def unzipFiles(path1,path2):
 
             zip_ref.close()
 
+            # Fix old phase file names
             if (len(glob.glob("{}/*_unw_phase.tif".format(path)))==0 and 
                 len(glob.glob("{}/*_unwrapped.tif".format(path)))==0):
-                logging.info("        found directory {} with no unwrapped phase files".format(path))
+                logging.debug("        found directory {} with no unwrapped phase files".format(path))
                 back = os.getcwd()
                 os.chdir(path)
                 for myfile in glob.glob("????????_????????_phase.tif"):
