@@ -42,6 +42,7 @@ from cutGeotiffsByLine import cutGeotiffsByLine
 from sortByTime import sortByTime
 from download_products import download_products
 from getUsernamePassword import getUsernamePassword
+from subset_geotiff_shape import subset_geotiff_shape
 from enh_lee_filter import enh_lee
 from asf_hyp3 import API
 from os.path import expanduser
@@ -58,7 +59,7 @@ def apply_speckle_filter(fi):
     dampening_factor = 1
     (x,y,trans,proj,img) = saa.read_gdal_file(saa.open_gdal_file(fi))
     data = enh_lee(looks,size,dampening_factor,img)
-    saa.write_gdal_file_float(outfile,trans,proj,data)
+    saa.write_gdal_file_float(outfile,trans,proj,data,nodata=0)
     return(outfile)
 
 def create_dB(fi):
@@ -72,27 +73,27 @@ def create_dB(fi):
     dBdata = 10 * np.log(data)
 
     outfile = fi.replace('.tif','_dB.tif')
-    saa.write_gdal_file_float(outfile,trans,proj,dBdata)
+    saa.write_gdal_file_float(outfile,trans,proj,dBdata,nodata=0)
     return(outfile)
 
 def pwr2amp(fi):
     x,y,trans,proj,data = saa.read_gdal_file(saa.open_gdal_file(fi))
     ampdata = np.sqrt(data)
     outfile = fi.replace(".tif","_amp.tif")
-    saa.write_gdal_file_float(outfile,trans,proj,ampdata)
+    saa.write_gdal_file_float(outfile,trans,proj,ampdata,nodata=0)
     return(outfile)
 
 def amp2pwr(fi):
     x,y,trans,proj,data = saa.read_gdal_file(saa.open_gdal_file(fi))
     pwrdata = data * data 
     outfile = fi.replace(".tif","_pwr.tif")
-    saa.write_gdal_file_float(outfile,trans,proj,pwrdata)
+    saa.write_gdal_file_float(outfile,trans,proj,pwrdata,nodata=0)
     return(outfile)
 
 def byteScale(fi,lower,upper):
     outfile = fi.replace('.tif','%s_%s.tif' % (int(lower),int(upper)))
     (x,y,trans,proj,data) = saa.read_gdal_file(saa.open_gdal_file(fi))
-    dst = gdal.Translate(outfile,fi,outputType=gdal.GDT_Byte,scaleParams=[[lower,upper]])
+    dst = gdal.Translate(outfile,fi,outputType=gdal.GDT_Byte,scaleParams=[[lower,upper]],noData=0)
     return(outfile)
 
 def get2sigmacutoffs(fi):
@@ -107,7 +108,7 @@ def get2sigmacutoffs(fi):
 
 def changeRes(res,fi):
     outfile = fi.replace('.tif','_%sm.tif' % int(res))
-    dst = gdal.Translate(outfile,fi,xRes=res,yRes=res,resampleAlg="average")
+    dst = gdal.Translate(outfile,fi,xRes=res,yRes=res,resampleAlg="average",noData=0)
     return(outfile)
 
 def cut(pt1,pt2,pt3,pt4,fi,thresh=0.4,aws=None):
@@ -115,7 +116,7 @@ def cut(pt1,pt2,pt3,pt4,fi,thresh=0.4,aws=None):
     if aws is not None:
 	    outfile = os.path.basename(outfile)
     coords = (pt1,pt2,pt3,pt4)
-    dst = gdal.Translate(outfile,fi,projWin=coords)
+    dst = gdal.Translate(outfile,fi,projWin=coords,noData=0)
     x,y,trans,proj,data = saa.read_gdal_file(dst)
     data[data!=0]=1
     frac = np.sum(np.sum(data))/(x*y)
@@ -128,24 +129,42 @@ def cut(pt1,pt2,pt3,pt4,fi,thresh=0.4,aws=None):
 # anno_s1b-iw-rtcm-vv-S1B_IW_GRDH_1SDV_20180118T031947_20180118T032012_009220_01084D_97C9_clipped_dB-40_0.png
 #
 
-def getDates(filelist):
-    dates = []
-    for myfile in filelist:
-        myfile = os.path.basename(myfile)
-        logging.debug("Getting date for file {}".format(myfile))
-        if "IW_RT" in myfile:
-            s = myfile.split("_")[3]
-            dates.append(s) 
-        else:
-            s = myfile.split("-")[4]
-            if len(s) <= 26:
-                t = s.split("_")[0]
-                dates.append(t)
-            else:       
-                t = s.split("_")[4]
-                dates.append(t)
+def getDates(filelist,dates=None):
+    if dates:
+         logging.info("Reading image names and dates from file {}".format(dates))
+         f = open("../{}".format(dates),"r")
+         new_dates = []
+         names = []
+         for line in f:
+             t = line.split()
+             if t[0] != "/":
+                    t[0] = os.path.join("{}/../".format(os.getcwd()),t[0])
+             names.append(t[0])
+             new_dates.append(t[1])
+         logging.info("Names: {}".format(names))
+         logging.info("Dates: {}".format(new_dates))
+    
+    else:
+        new_dates = []
+        names = []
+        for myfile in filelist:
+            myfile = os.path.basename(myfile)
+            logging.debug("Getting date for file {}".format(myfile))
+            if "IW_RT" in myfile:
+                s = myfile.split("_")[3]
+                new_dates.append(s) 
+                names.append(myfile) 
+            else:
+                s = myfile.split("-")[4]
+                if len(s) <= 26:
+                    t = s.split("_")[0]
+                    new_dates.append(t)
+                else:       
+                    t = s.split("_")[4]
+                    new_dates.append(t)
+                names.append(myfile) 
             
-    return(dates)
+    return(names,new_dates)
 
 def report_stats(myfile,tmpfile,frac):
     msg = "{} : {} : ".format(myfile,frac)
@@ -199,7 +218,7 @@ def fix_projections(filelist,aws,all_proj,all_pixsize,all_coords):
                     proj = ('EPSG:327%02d' % int(zone1))
                 if aws is None:
                     name = file2.replace(".tif","_reproj.tif")
-                    gdal.Warp(name,file2,dstSRS=proj,xRes=pixsize,yRes=pixsize)
+                    gdal.Warp(name,file2,dstSRS=proj,xRes=pixsize,yRes=pixsize,noData=0)
                     filelist[x+1] = name
                 else:
                     reproj_list.append(proj)
@@ -212,7 +231,8 @@ def cutStack(filelist,overlap,clip,shape,thresh,aws,all_proj,all_pixsize,all_coo
     filelist,reproj_list = fix_projections(filelist,aws,all_proj,all_pixsize,all_coords)
     if overlap:
         logging.info("Cutting files to common overlap")
-        power_filelist = cutGeotiffsByLine(filelist,all_coords=all_coords,all_pixsize=all_pixsize)
+#        power_filelist = cutGeotiffsByLine(filelist,all_coords=all_coords,all_pixsize=all_pixsize)
+        power_filelist = cutGeotiffsByLine(filelist)
     elif clip is not None:
         pt1 = clip[0]
         pt2 = clip[1]
@@ -231,7 +251,7 @@ def cutStack(filelist,overlap,clip,shape,thresh,aws,all_proj,all_pixsize,all_coo
         logging.info("Clipping to shape file {}".format(shape))
         power_filelist = []
         for i in range(len(filelist)):
-            outGeoTIFF = fi.replace('.tif','_shape.tif')
+            outGeoTIFF = filelist[i].replace('.tif','_shape.tif')
             subset_geotiff_shape(filelist[i], shape, outGeoTIFF)
             if os.path.isfile(outGeoTIFF):
                 power_filelist.append(outGeoTIFF)
@@ -342,20 +362,20 @@ def getAscDesc(myxml):
             if 'descending' in item:
                  return "d"
 
-def getXmlFiles(filelist):
-    dates = getDates(filelist)
-    logging.debug("Got dates {}".format(dates))
+def getXmlFiles(filelist,dates):
+    names,new_dates = getDates(filelist,dates)
+    logging.debug("Got dates {}".format(new_dates))
     logging.debug("In directory {}".format(os.getcwd()))
     newlist = []
-    for date in dates:
+    for date in new_dates:
         mydir = glob.glob("*{}*-rtc-gamma".format(date))[0]
         myfile = glob.glob("{}/*.iso.xml".format(mydir))[0]
         logging.debug("looking for {}".format(myfile))
         newlist.append(myfile)
     return(newlist)
  
-def cull_list_by_direction(filelist,direction):
-    xmlFiles = getXmlFiles(filelist)
+def cull_list_by_direction(filelist,direction,dates=None):
+    new_dates,xmlFiles = getXmlFiles(filelist,dates)
     logging.debug("Got xmlfiles {}".format(xmlFiles))
     newlist = []
     for i in range(len(filelist)):
@@ -404,7 +424,7 @@ def filter_file_list(file_list,subdir,ext):
 
 def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
     scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-    font=24,keep=None,aws=None,inamp=False):
+    font=24,keep=None,aws=None,inamp=False,exclude=False,datefile=None):
 
     logging.info("***********************************************************************************")
     logging.info("                 STARTING RUN {}".format(outfile))
@@ -427,6 +447,8 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
             exit(1)
 
     if shape is not None:
+        base = os.getcwd()
+        shape = os.path.join(base,shape)
         if not os.path.isfile(shape):
             logging.error("ERROR: Shape file {} does not exist".format(shape))
     	    exit(1)
@@ -462,6 +484,10 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     	    filelist = filter_file_list(filelist,path,'.tif')
     	    for i in xrange(len(filelist)):
     		filelist[i] = "/vsis3/" + aws + "/" + filelist[i]
+        elif datefile is not None:
+            os.chdir("TEMP")
+            filelist, dates = getDates(None,datefile)
+            os.chdir("..")
     	else:
     	    infiles = None
     	    if zipFlag:
@@ -531,7 +557,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     logging.info("{}".format(filelist))
 
     if keep is not None and aws is None:
-        filelist = cull_list_by_direction(filelist,keep)
+        filelist = cull_list_by_direction(filelist,keep,dates)
         if len(filelist) == 0:
             logging.error("All files have been culled by direction ({})".format(keep))
             exit(1)
@@ -575,42 +601,43 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         bytefile = byteScale(tmpfile,scale[0],scale[1])
         byte_filelist.append(bytefile)
 
-    png_filelist = []
-    for myfile in byte_filelist:
-        pngFile = myfile.replace(".tif",".png")
-        gdal.Translate(pngFile,myfile,format="PNG")
-        png_filelist.append(pngFile) 
+    if not exclude:
+        png_filelist = []
+        for myfile in byte_filelist:
+            pngFile = myfile.replace(".tif",".png")
+            gdal.Translate(pngFile,myfile,format="PNG",noData=0)
+            png_filelist.append(pngFile) 
 
-    # Sort files based upon date and not upon file names!
-    cnt = 0
-    dates = getDates(png_filelist)        
-    date_and_file = []
-    for myfile in png_filelist:
-        # If using hyp files, annotate with dates
-        if infiles is None and aws is None:
-            newFile = "anno_{}".format(myfile)
-            execute("convert {FILE} -pointsize {FONT} -gravity north -stroke '#000C' -strokewidth 2 -annotate +0+5 '{DATE}' -stroke none -fill white -annotate +0+5 '{DATE}' {FILE2}". format(FILE=myfile,FILE2=newFile,DATE=dates[cnt],FONT=font)) 
-            os.remove(myfile)
+        # Sort files based upon date and not upon file names!
+        cnt = 0
+        names,dates = getDates(png_filelist,datefile) 
+        date_and_file = []
+        for myfile in png_filelist:
+            # If using hyp files, annotate with dates
+            if (infiles is None and aws is None):
+                newFile = "anno_{}".format(myfile)
+                execute("convert {FILE} -pointsize {FONT} -gravity north -stroke '#000C' -strokewidth 2 -annotate +0+5 '{DATE}' -stroke none -fill white -annotate +0+5 '{DATE}' {FILE2}". format(FILE=myfile,FILE2=newFile,DATE=dates[cnt],FONT=font)) 
+                os.remove(myfile)
+            else:
+                newFile = myfile
+
+            m = [newFile,dates[cnt]]
+            date_and_file.append(m)
+            cnt = cnt + 1
+
+        date_and_file.sort(key = lambda row: row[1])
+    
+        # Create the animated gif file
+        if outfile is not None:
+            output = outfile + ".gif"
         else:
-            newFile = myfile
+            output = "animation.gif"
 
-        m = [newFile,dates[cnt]]
-        date_and_file.append(m)
-        cnt = cnt + 1
+        string = ""
+        for i in range(len(png_filelist)):
+            string = string + " " + date_and_file[i][0]
 
-    date_and_file.sort(key = lambda row: row[1])
-
-    # Create the animated gif file
-    if outfile is not None:
-        output = outfile + ".gif"
-    else:
-        output = "animation.gif"
-
-    string = ""
-    for i in range(len(png_filelist)):
-        string = string + " " + date_and_file[i][0]
-
-    execute("convert -delay 120 -loop 0 {} {}".format(string,output)) 
+        execute("convert -delay 50 -loop 0 {} {}".format(string,output)) 
 
     # Create and populate the product directory    
     if outfile is not None:
@@ -619,7 +646,8 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         prodDir = "PRODUCT" 
     createCleanDir(prodDir)
 
-    shutil.move(output,prodDir)
+    if not exclude:
+        shutil.move(output,prodDir)
 
     if type == 'power':
         for myfile in power_filelist:
@@ -638,7 +666,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
             else:
                 myrange = get2sigmacutoffs(ampfile)
                 newFile = ampfile.replace(".tif","_sigma.tif") 
-                gdal.Translate(newFile,ampfile,outputType=gdal.GDT_Byte,scaleParams=[myrange],resampleAlg="average")
+                gdal.Translate(newFile,ampfile,outputType=gdal.GDT_Byte,scaleParams=[myrange],resampleAlg="average",noData=0)
                 shutil.move(newFile,prodDir)
     
     os.chdir("..")
@@ -672,7 +700,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
 
 def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
         scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-        font=24,hyp=None,keep=None,group=False,aws=None,inamp=False):
+        font=24,hyp=None,keep=None,group=False,aws=None,inamp=False,exclude=False,dates=None):
 
     cmd = "procS1StackRTC.py "
     if outfile:
@@ -704,13 +732,17 @@ def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,ty
     if font != 24:
        cmd = cmd + "--magnify {} ".format(font)
     if hyp:
-       cmd = cmd + "--name {} ".format(hyp)
+       cmd = cmd + '--name "{}" '.format(hyp)
     if keep:
        cmd = cmd + "--keep {} ".format(keep)
     if group:
        cmd = cmd + "--group "
     if inamp:
        cmd = cmd + "--inamp "
+    if exclude:
+       cmd = cmd + "--exclude "
+    if dates:
+       cmd = cmd + "--dates {} ".format(dates)
   
     if infiles:
        for myfile in infiles:
@@ -737,12 +769,14 @@ def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,ty
     logging.info("    hyp name of subscription  : {} ".format(hyp))
     logging.info("    keep ascending/descending : {} ".format(keep))
     logging.info("    group flag                : {} ".format(group))
+    logging.info("    exclude flag              : {} ".format(exclude))
+    logging.info("    dates file                : {} ".format(dates))
     logging.info("\n")
 
 
 def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=False,type='dB-byte',
         scale=[-40,0],clip=None,shape=None,overlap=False,zipFlag=False,leave=False,thresh=0.4,
-        font=24,hyp=None,keep=None,group=False,aws=None,inamp=False):
+        font=24,hyp=None,keep=None,group=False,aws=None,inamp=False,exclude=False,dates=None):
 
     if outfile is not None:
         logFile = "{}_log.txt".format(outfile)
@@ -755,7 +789,7 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
     logging.info("***********************************************************************************")
 
     printParameters(outfile,infiles,path,res,filter,type,scale,clip,shape,overlap,zipFlag,
-                    leave,thresh,font,hyp,keep,group,aws,inamp)
+                    leave,thresh,font,hyp,keep,group,aws,inamp,exclude,dates)
 
     if hyp:
         logging.info("Using Hyp3 subscription named {} to download input files".format(hyp))
@@ -827,14 +861,16 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
 
                 procS1StackRTC(outfile=output,infiles=infiles,path=mydir,res=res,filter=filter,
                     type=type,scale=scale,clip=None,shape=None,overlap=True,zipFlag=zipFlag,
-                    leave=leave,thresh=thresh,font=font,keep=keep,aws=aws,inamp=inamp)
+                    leave=leave,thresh=thresh,font=font,keep=keep,aws=aws,inamp=inamp,exclude=exclude,
+                    datefile=dates)
 
                 if mydir is not None:
                     shutil.rmtree(mydir)
     else:
         procS1StackRTC(outfile=outfile,infiles=infiles,path=path,res=res,filter=filter,
             type=type,scale=scale,clip=clip,shape=shape,overlap=overlap,zipFlag=zipFlag,
-            leave=leave,thresh=thresh,font=font,keep=keep,aws=aws,inamp=inamp)
+            leave=leave,thresh=thresh,font=font,keep=keep,aws=aws,inamp=inamp,exclude=exclude,
+            datefile=dates)
 
     if not leave and group:
         for myfile in glob.glob("sorted_*"):
@@ -847,17 +883,17 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="procS1StackRTC.py",description="Create RTC time series")
-    parser.add_argument("infile",nargs="*",help="Input tif filenames, if none given will work from hyp zip files")
     parser.add_argument("-b","--black",type=float,help="Fraction of black required to remove an image (def 0.4)",default=0.4)
     parser.add_argument("-d","--dBscale",nargs=2,metavar=('upper','lower'),type=float,help="Upper and lower dB for scaling (default -40 0)",default=[-40,0])
+    parser.add_argument("-e","--exclude",action='store_true',help="Excludes video creation")
     parser.add_argument("-f","--filter",action='store_true',help="Apply speckle filtering")
     parser.add_argument("-g","--group",action='store_true',help="Group files by time before processing into stacks.  Turns on overlap option.")
-    parser.add_argument("-i","--inamp",action='store_true',help="Input files are amplitude instead of power.")
     parser.add_argument("-k","--keep",choices=['a','d'],help="Switch to keep only ascending or descending images (default is to keep all)")
     parser.add_argument("-l","--leave",action="store_true",help="Leave intermediate files in place")
     parser.add_argument("-m","--magnify",type=int,help="Magnify (set) annotation font size (def 24)",default=24)
     parser.add_argument("-o","--outfile",help="Output animation filename")
     parser.add_argument("-p","--path",help="Path to the input files")
+    parser.add_argument("-q","--inamp",action='store_true',help="Input files are amplitude instead of power.")
     parser.add_argument("-r","--res",type=float,help="Desired output resolution")
     parser.add_argument("-t","--type",choices=['dB','sigma-byte','dB-byte','amp','power'],help="Output type (default dB-byte)",default="dB-byte")
     parser.add_argument("-z","--zip",action='store_true',help="Start from hyp3 zip files instead of directories")
@@ -868,6 +904,8 @@ if __name__ == "__main__":
     group = parser.add_mutually_exclusive_group()
     group.add_argument("-a","--aws",help="bucket name to read tif files from")
     group.add_argument("-n","--name",type=str,help="Name of the Hyp3 subscription to download for input files")
+    group.add_argument("-j","--dates",type=str,help="Names of files and associated dates (for non HyP3 inputs)")
+    group.add_argument("-i","--infile",nargs="*",help="Input tif filenames, if none given will work from hyp zip files")
     args = parser.parse_args()
 
     if args.outfile is not None:
@@ -880,6 +918,6 @@ if __name__ == "__main__":
 
     procS1StackGroupsRTC(outfile=args.outfile,infiles=args.infile,path=args.path,res=args.res,filter=args.filter,
         type=args.type,scale=args.dBscale,clip=args.clip,shape=args.shape,overlap=args.overlap,zipFlag=args.zip,
-        leave=args.leave,thresh=args.black,font=args.magnify,hyp=args.name,
-        keep=args.keep,group=args.group,aws=args.aws,inamp=args.inamp)
+        leave=args.leave,thresh=args.black,font=args.magnify,hyp=args.name,keep=args.keep,group=args.group,
+        aws=args.aws,inamp=args.inamp,exclude=args.exclude,dates=args.dates)
  
