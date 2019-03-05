@@ -55,9 +55,18 @@ def sortByTime(path,filelist,filetype):
             csecofday = (((chour*60)+cmin)*60)+csec 
             
             if (abs(csecofday-secofday)%86400) < 11:
-                lists[j].append(newlist[i])
-                placed = True
-                break
+                if filetype == "rtc":
+                    if ("S1A" in newlist[i] and "S1A" in lists[j][0]):
+                        lists[j].append(newlist[i])
+                        placed = True
+                    elif ("S1B" in newlist[i] and "S1B" in lists[j][0]):
+                        lists[j].append(newlist[i])
+                        placed = True
+                else:
+                    lists[j].append(newlist[i])
+                    placed = True
+                if placed:
+                       break
         if not placed:
             max_classes = max_classes+1
             classes.append(times[i])
@@ -96,7 +105,7 @@ if __name__ == "__main__":
     logging.info("Starting run")
 
     filelist = glob.glob("*.zip")
-    filetype = "insar"
+    filetype = "rtc"
     path = "."
     sortByTime(path,filelist,filetype)
 

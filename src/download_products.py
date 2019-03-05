@@ -31,7 +31,16 @@ def download_products(
                         verbose=True,
                         threads=0):
     try:
-        product_list = api.get_products(id, sub_id=sub_id, sub_name=sub_name, creation_date=creation_date)
+        product_list = [] 
+        products = 100
+        page = 0
+        while (products == 100):
+            prod_list = api.get_products(id, sub_id=sub_id, sub_name=sub_name, creation_date=creation_date,page=page)
+            products = len(prod_list)
+            product_list = product_list + prod_list
+            page = page + 1
+            print("Found {} products; on page {}".format(products,page))
+       
     except requests.ConnectionError:
         if verbose:
             print("Could not connect to the api")
