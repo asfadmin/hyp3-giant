@@ -92,8 +92,21 @@ def amp2pwr(fi):
 
 def byteScale(fi,lower,upper):
     outfile = fi.replace('.tif','%s_%s.tif' % (int(lower),int(upper)))
+    gdal.Translate(outfile,fi,outputType=gdal.GDT_Byte,scaleParams=[[lower,upper]],noData=0)
+    
+    # Once again, I'm getting zeros in my files eventhough I have set 
+    # the output range to 1,255!  The following will fix the issue.
     (x,y,trans,proj,data) = saa.read_gdal_file(saa.open_gdal_file(fi))
-    dst = gdal.Translate(outfile,fi,outputType=gdal.GDT_Byte,scaleParams=[[lower,upper]],noData=0)
+    mask = np.isinf(data)
+    data[mask==True]=0
+    mask = (data<0).astype(bool)
+    (x,y,trans,proj,data) = saa.read_gdal_file(saa.open_gdal_file(outfile))
+    mask2 = (data>0).astype(bool)
+    saa.write_gdal_file_byte("mask2.tif",trans,proj,mask.astype(np.byte),nodata=0) 
+    mask3 = mask ^ mask2
+    data[mask3==True] = 1
+    saa.write_gdal_file_byte(outfile,trans,proj,data,nodata=0) 
+
     return(outfile)
 
 def get2sigmacutoffs(fi):
