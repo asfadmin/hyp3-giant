@@ -200,13 +200,26 @@ def changeResStack(filelist,res):
         filelist[i] = changeRes(res,filelist[i]) 
     return filelist
 
+def read_tif_header(fi):
+    x,y,trans,proj = saa.read_gdal_file_geo(saa.open_gdal_file(fi))
+    lat_max = trans[3]
+    lat_min = trans[3] + y*trans[5]
+    lon_min = trans[0]
+    lon_max = trans[0] + x*trans[1]
+    coords = [lon_min,lat_max,lon_max,lat_min]
+    return(proj,trans,coords)
+
+def fix_lists(filelist,all_proj,all_pixsize,all_coords,item):
+    proj,trans,coords = read_tif_header(filelist[item])
+    all_proj[item] = proj
+    all_pixsize[item] = trans[1]
+    all_coords[item] = coords
 
 def fix_projections(filelist,aws,all_proj,all_pixsize,all_coords):
 
     # Get projection and pixsize for first image
     proj = all_proj[0]
     pixsize = all_pixsize[0]
-   
     reproj_list = []
 
     # Make sure that UTM projections match
@@ -231,8 +244,9 @@ def fix_projections(filelist,aws,all_proj,all_pixsize,all_coords):
                     proj = ('EPSG:327%02d' % int(zone1))
                 if aws is None:
                     name = file2.replace(".tif","_reproj.tif")
-                    gdal.Warp(name,file2,dstSRS=proj,xRes=pixsize,yRes=pixsize,noData=0)
+                    gdal.Warp(name,file2,dstSRS=proj,xRes=pixsize,yRes=pixsize,dstNodata=0)
                     filelist[x+1] = name
+                    fix_lists(filelist,all_proj,all_pixsize,all_coords,x+1)
                 else:
                     reproj_list.append(proj)
             elif aws is not None:
@@ -244,8 +258,8 @@ def cutStack(filelist,overlap,clip,shape,thresh,aws,all_proj,all_pixsize,all_coo
     filelist,reproj_list = fix_projections(filelist,aws,all_proj,all_pixsize,all_coords)
     if overlap:
         logging.info("Cutting files to common overlap")
-#        power_filelist = cutGeotiffsByLine(filelist,all_coords=all_coords,all_pixsize=all_pixsize)
-        power_filelist = cutGeotiffsByLine(filelist)
+        power_filelist = cutGeotiffsByLine(filelist,all_coords=all_coords,all_pixsize=all_pixsize)
+#        power_filelist = cutGeotiffsByLine(filelist)
     elif clip is not None:
         pt1 = clip[0]
         pt2 = clip[1]
@@ -275,7 +289,6 @@ def cutStack(filelist,overlap,clip,shape,thresh,aws,all_proj,all_pixsize,all_coo
 
 
 def read_metadata(filelist):
-    
     os.chdir("TEMP")   
     all_proj = []
     all_coords = [] 
@@ -283,20 +296,11 @@ def read_metadata(filelist):
     for i in range(len(filelist)):
         logging.debug("In directory {}".format(os.getcwd()))
         logging.info("Reading metadata for {}".format(filelist[i]))
-        x,y,trans,proj = saa.read_gdal_file_geo(saa.open_gdal_file(filelist[i]))
-
-        lat_max = trans[3]
-        lat_min = trans[3] + y*trans[5]
-        lon_min = trans[0]
-        lon_max = trans[0] + x*trans[1]
-
-        coords = [lon_min,lat_max,lon_max,lat_min]
+        proj,trans,coords = read_tif_header(filelist[i])
 	logging.debug("{}".format(coords))
-	
         all_coords.append(coords)
         all_proj.append(proj)
         all_pixsize.append(trans[1])
-
     os.chdir("..")   
     return all_proj,all_coords,all_pixsize
 
@@ -375,25 +379,24 @@ def getAscDesc(myxml):
             if 'descending' in item:
                  return "d"
 
-def getXmlFiles(filelist,dates):
+def getXmlFiles(filelist,dates=None):
     names,new_dates = getDates(filelist,dates)
     logging.debug("Got dates {}".format(new_dates))
-    logging.debug("In directory {}".format(os.getcwd()))
     newlist = []
     for date in new_dates:
         mydir = glob.glob("*{}*-rtc-gamma".format(date))[0]
         myfile = glob.glob("{}/*.iso.xml".format(mydir))[0]
         logging.debug("looking for {}".format(myfile))
         newlist.append(myfile)
-    return(newlist)
+    return(new_dates,newlist)
  
 def cull_list_by_direction(filelist,direction,dates=None):
-    new_dates,xmlFiles = getXmlFiles(filelist,dates)
+    new_dates,xmlFiles = getXmlFiles(filelist,dates=dates)
     logging.debug("Got xmlfiles {}".format(xmlFiles))
     newlist = []
     for i in range(len(filelist)):
         myfile = filelist[i]
-        logging.info("Checking file {} for flight direction".format(myfile))
+        logging.info("Checking file {} for flight direction".format(xmlFiles[i]))
         ad = getAscDesc(xmlFiles[i])
         logging.info("    Found adflag {}".format(ad))
         if ad == direction:
@@ -442,6 +445,8 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     logging.info("***********************************************************************************")
     logging.info("                 STARTING RUN {}".format(outfile))
     logging.info("***********************************************************************************")
+
+    dates = None
 
     # Do some error checking and info printing
     types=['dB','sigma-byte','dB-byte','amp','power']
@@ -570,7 +575,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     logging.info("{}".format(filelist))
 
     if keep is not None and aws is None:
-        filelist = cull_list_by_direction(filelist,keep,dates)
+        filelist = cull_list_by_direction(filelist,keep)
         if len(filelist) == 0:
             logging.error("All files have been culled by direction ({})".format(keep))
             exit(1)
@@ -817,6 +822,15 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
     if zipFlag:
         unzipFiles(path,"hyp3-products-unzipped")
         zipFlag = False
+        path = "hyp3-products-unzipped"
+
+    # Catch the case where
+    #       no path is specified,
+    #       no input files are specified, 
+    #       we're not using a HyP3 subscription,
+    #       we're not using AWS,
+    #       and no dates file is specified... 
+    if path is None and hyp is None and infiles is None and dates is None and aws is None:
         path = "hyp3-products-unzipped"
 
     if group:
