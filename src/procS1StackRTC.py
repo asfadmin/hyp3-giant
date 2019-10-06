@@ -163,20 +163,25 @@ def getDates(filelist,dates=None):
         for myfile in filelist:
             myfile = os.path.basename(myfile)
             logging.debug("Getting date for file {}".format(myfile))
-            if "IW_RT" in myfile:
-                s = myfile.split("_")[3]
-                new_dates.append(s) 
-                names.append(myfile) 
-            else:
-                s = myfile.split("-")[4]
-                if len(s) <= 26:
-                    t = s.split("_")[0]
-                    new_dates.append(t)
-                else:       
-                    t = s.split("_")[4]
-                    new_dates.append(t)
-                names.append(myfile) 
-            
+            try:
+                if "IW_RT" in myfile:
+                    s = myfile.split("_")[3]
+                    new_dates.append(s) 
+                    names.append(myfile) 
+                else:
+                    s = myfile.split("-")[4]
+                    if len(s) <= 26:
+                        t = s.split("_")[0]
+                        new_dates.append(t)
+                    else:       
+                        t = s.split("_")[4]
+                        new_dates.append(t)
+                    names.append(myfile) 
+            except:
+                names.append(myfile)
+                new_dates.append("UNKNOWN")
+                logging.warning("Unable to determine date for file {}".format(myfile))
+
     return(names,new_dates)
 
 def report_stats(myfile,tmpfile,frac):
@@ -392,19 +397,23 @@ def getXmlFiles(filelist,dates=None):
  
 def cull_list_by_direction(filelist,direction,dates=None):
     new_dates,xmlFiles = getXmlFiles(filelist,dates=dates)
-    logging.debug("Got xmlfiles {}".format(xmlFiles))
-    newlist = []
-    for i in range(len(filelist)):
-        myfile = filelist[i]
-        logging.info("Checking file {} for flight direction".format(xmlFiles[i]))
-        ad = getAscDesc(xmlFiles[i])
-        logging.info("    Found adflag {}".format(ad))
-        if ad == direction:
-            logging.info("    Keeping")
-            newlist.append(myfile)
-        else:
-            logging.info("    Discarding")
-    return newlist 
+    if len(xmlFiles)>0:
+        newlist = []
+        logging.debug("Got xmlfiles {}".format(xmlFiles))
+        for i in range(len(filelist)):
+            myfile = filelist[i]
+            logging.info("Checking file {} for flight direction".format(xmlFiles[i]))
+            ad = getAscDesc(xmlFiles[i])
+            logging.info("    Found adflag {}".format(ad))
+            if ad == direction:
+                logging.info("    Keeping")
+                newlist.append(myfile)
+            else:
+                logging.info("    Discarding")
+        return newlist 
+    else:
+        logging.warning("Unable to determine orbit direction; using all files")
+        return filelist
 
 def aws_ls(bucket_name):
     s3 = boto3.resource('s3')
@@ -643,7 +652,8 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
             date_and_file.append(m)
             cnt = cnt + 1
 
-        date_and_file.sort(key = lambda row: row[1])
+        if dates[0] != "UNKNOWN":
+            date_and_file.sort(key = lambda row: row[1])
     
         # Create the animated gif file
         if outfile is not None:
