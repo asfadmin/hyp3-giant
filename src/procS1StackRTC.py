@@ -782,7 +782,7 @@ def printParameters(outfile=None,infiles=None,path=None,res=None,filter=False,ty
 
     logging.info("Command Run: {}".format(cmd))
     logging.info(" ")
-    logging.info("Parameters for this run: {}")
+    logging.info("Parameters for this run:")
     logging.info("    output name               : {} ".format(outfile))
     logging.info("    input files               : {} ".format(infiles))
     logging.info("    path to input files       : {} ".format(path))
@@ -848,71 +848,72 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
     if path is None and hyp is None and infiles is None and dates is None and aws is None:
         path = "hyp3-products-unzipped"
 
-    if group:
-        if aws is not None:
-            filelist = aws_ls(aws)
-            filelist = filter_file_list(filelist,path,'.tif')
-            for i in xrange(len(filelist)):
-                filelist[i] = "/vsis3/" + aws + "/" + filelist[i]
-		
-        elif (infiles is None or len(infiles)==0):
-            # Make path into an absolute path
-            if path is not None:
-                if path[0] != "/":
-                    root = os.getcwd()
-                    path = os.path.join(root,path)
-                if not os.path.isdir(path):
-                    logging.error("ERROR: path {} is not a directory!".format(path))
-                    exit(1)
-                logging.info("Data path is {}".format(path))
-            else:
-                path = os.getcwd()
-
-            if zipFlag:
-                filelist = glob.glob("{}/S1*.zip".format(path))
-            else:
-                filelist = []
-                logging.debug("Path is {}".format(path))
-                for myfile in os.listdir(path):
-                    if os.path.isdir(os.path.join(path,myfile)):
-                        filelist.append(myfile)
-
-        if len(filelist)==0:
-            logging.error("ERROR: Unable to find input files")
-            exit(1)
-
-        classes, filelists = sortByTime(path,filelist,"rtc")
-	logging.debug("aws is {}".format(aws))
-        for i in range(len(classes)):
-            if len(filelists[i])>2:
-
-                if aws is None:
-    		    time = classes[i]
-    		    mydir = "DATA_{}".format(classes[i])
-    		    logging.info("Making clean directory {}".format(mydir))
-    		    createCleanDir(mydir)
-    		    for myfile in filelists[i]:
-    			newfile = os.path.join(mydir,os.path.basename(myfile))
-    			logging.info("Linking file {} to {}".format(os.path.join(path,myfile),newfile))
-    			os.symlink(os.path.join(path,myfile),newfile)
-	        else:
-		    mydir = None
-		    infiles = filelists[i]
-                
-		output = outfile + "_" + classes[i]
-
-                procS1StackRTC(outfile=output,infiles=infiles,path=mydir,res=res,filter=filter,
-                    type=type,scale=scale,clip=None,shape=None,overlap=True,zipFlag=zipFlag,
-                    leave=leave,thresh=thresh,font=font,keep=keep,aws=aws,inamp=inamp,exclude=exclude,
-                    datefile=dates,delay=delay)
-
-                if mydir is not None:
-                    shutil.rmtree(mydir)
-    else:
+    if infiles: 
         procS1StackRTC(outfile=outfile,infiles=infiles,path=path,res=res,filter=filter,
             type=type,scale=scale,clip=clip,shape=shape,overlap=overlap,zipFlag=zipFlag,
             leave=leave,thresh=thresh,font=font,keep=keep,aws=aws,inamp=inamp,exclude=exclude,
             datefile=dates,delay=delay)
+    else:
+        if group:
+            if aws is not None:
+                filelist = aws_ls(aws)
+                filelist = filter_file_list(filelist,path,'.tif')
+                for i in xrange(len(filelist)):
+                    filelist[i] = "/vsis3/" + aws + "/" + filelist[i]
+		
+            elif (infiles is None or len(infiles)==0):
+                # Make path into an absolute path
+                if path is not None:
+                    if path[0] != "/":
+                        root = os.getcwd()
+                        path = os.path.join(root,path)
+                    if not os.path.isdir(path):
+                        logging.error("ERROR: path {} is not a directory!".format(path))
+                        exit(1)
+                    logging.info("Data path is {}".format(path))
+                else:
+                    path = os.getcwd()
+
+                if zipFlag:
+                    filelist = glob.glob("{}/S1*.zip".format(path))
+                else:
+                    filelist = []
+                    logging.debug("Path is {}".format(path))
+                    for myfile in os.listdir(path):
+                        logging.debug("Trying {}".format(myfile))
+                        if os.path.isdir(os.path.join(path,myfile)):
+                            logging.debug("Adding {} to list".format(myfile))
+                            filelist.append(myfile)
+
+            if len(filelist)==0:
+                logging.error("ERROR: Unable to find input files")
+                exit(1)
+
+            classes, filelists = sortByTime(path,filelist,"rtc")
+            logging.debug("aws is {}".format(aws))
+            for i in range(len(classes)):
+                if len(filelists[i])>2:
+                    if aws is None:
+                        time = classes[i]
+                        mydir = "DATA_{}".format(classes[i])
+                        logging.info("Making clean directory {}".format(mydir))
+                        createCleanDir(mydir)
+                        for myfile in filelists[i]:
+                            newfile = os.path.join(mydir,os.path.basename(myfile))
+                            logging.info("Linking file {} to {}".format(os.path.join(path,myfile),newfile))
+                            os.symlink(os.path.join(path,myfile),newfile)
+                    else:
+                        mydir = None
+                        infiles = filelists[i]
+
+                    output = outfile + "_" + classes[i]
+                    procS1StackRTC(outfile=output,infiles=infiles,path=mydir,res=res,filter=filter,
+                                 type=type,scale=scale,clip=None,shape=None,overlap=True,zipFlag=zipFlag,
+                                 leave=leave,thresh=thresh,font=font,keep=keep,aws=aws,inamp=inamp,exclude=exclude,
+                                 datefile=dates,delay=delay)
+
+                    if mydir is not None:
+                        shutil.rmtree(mydir)
 
     if not leave and group:
         for myfile in glob.glob("sorted_*"):
