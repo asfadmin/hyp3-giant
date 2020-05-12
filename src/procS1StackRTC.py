@@ -127,7 +127,7 @@ def changeRes(res,fi):
 def cut(pt1,pt2,pt3,pt4,fi,thresh=0.4,aws=None):
     outfile = fi.replace('.tif','_clipped.tif')
     if aws is not None:
-	    outfile = os.path.basename(outfile)
+            outfile = os.path.basename(outfile)
     coords = (pt1,pt2,pt3,pt4)
     dst = gdal.Translate(outfile,fi,projWin=coords,noData=0)
     x,y,trans,proj,data = saa.read_gdal_file(dst)
@@ -302,7 +302,7 @@ def read_metadata(filelist):
         logging.debug("In directory {}".format(os.getcwd()))
         logging.info("Reading metadata for {}".format(filelist[i]))
         proj,trans,coords = read_tif_header(filelist[i])
-	logging.debug("{}".format(coords))
+        logging.debug("{}".format(coords))
         all_coords.append(coords)
         all_proj.append(proj)
         all_pixsize.append(trans[1])
@@ -441,7 +441,7 @@ def filter_file_list(file_list,subdir,ext):
                 new_list.append(myfile)
         else:
             if ext in myfile and myfile.count('/') == 0:
-	        logging.debug("adding file {} to list".format(myfile))
+                logging.debug("adding file {} to list".format(myfile))
                 new_list.append(myfile)
     return new_list
 
@@ -478,7 +478,7 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
         shape = os.path.join(base,shape)
         if not os.path.isfile(shape):
             logging.error("ERROR: Shape file {} does not exist".format(shape))
-    	    exit(1)
+            exit(1)
         if clip is not None:
             logging.error("ERROR: Can not use both shapefile and image clipping options")
             exit(1)
@@ -506,47 +506,47 @@ def procS1StackRTC(outfile=None,infiles=None,path=None,res=None,filter=False,typ
     filelist = []
 
     if infiles is None or len(infiles)==0:
-    	if aws is not None:
-    	    filelist = aws_ls(aws)
-    	    filelist = filter_file_list(filelist,path,'.tif')
-    	    for i in xrange(len(filelist)):
-    		filelist[i] = "/vsis3/" + aws + "/" + filelist[i]
+        if aws is not None:
+            filelist = aws_ls(aws)
+            filelist = filter_file_list(filelist,path,'.tif')
+            for i in xrange(len(filelist)):
+                filelist[i] = "/vsis3/" + aws + "/" + filelist[i]
         elif datefile is not None:
             os.chdir("TEMP")
             filelist, dates = getDates(None,datefile)
             os.chdir("..")
-    	else:
-    	    infiles = None
-    	    if zipFlag:
-    		logging.info("No input files given, using hyp3 zip files from {}".format(path))
-    		unzipFiles(path,"TEMP")
-    	    else:
-    		logging.info("No input files given, using already unzipped hyp3 files in {}".format(path))
-    		os.chdir("TEMP")
-    		for myfile in os.listdir(path):
-    		    if os.path.isdir(os.path.join(path,myfile)) and ("-rtc-" in myfile or "_RTC" in myfile):
-    			os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
+        else:
+            infiles = None
+            if zipFlag:
+                logging.info("No input files given, using hyp3 zip files from {}".format(path))
+                unzipFiles(path,"TEMP")
+            else:
+                logging.info("No input files given, using already unzipped hyp3 files in {}".format(path))
+                os.chdir("TEMP")
+                for myfile in os.listdir(path):
+                    if os.path.isdir(os.path.join(path,myfile)) and ("-rtc-" in myfile or "_RTC" in myfile):
+                        os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
                     elif os.path.isfile(os.path.join(path,myfile)) and ("RT" in myfile):
-    			os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
+                        os.symlink(os.path.join(path,myfile),os.path.basename(myfile))
 
-    		os.chdir("..")
+                os.chdir("..")
 
-    	    # Now, get the actual list of files
-    	    os.chdir("TEMP")
-    	    filelist = glob.glob("*/*vv*.tif")
+            # Now, get the actual list of files
+            os.chdir("TEMP")
+            filelist = glob.glob("*/*vv*.tif")
             filelist = filelist + glob.glob("*/*VV*.tif")
             if len(filelist) == 0:
                 filelist = glob.glob("*/*hh*.tif")
                 filelist = filelist + glob.glob("*/*HH*.tif")
 
-    	    # Older zip files don't unzip into their own directories!
-    	    filelist = filelist +  glob.glob("*vv*.tif")
-    	    filelist = filelist +  glob.glob("*VV*.tif")
+            # Older zip files don't unzip into their own directories!
+            filelist = filelist +  glob.glob("*vv*.tif")
+            filelist = filelist +  glob.glob("*VV*.tif")
             if len(filelist) == 0:
                 filelist = filelist +  glob.glob("*hh*.tif")
                 filelist = filelist +  glob.glob("*HH*.tif")
 
-    	    os.chdir("..") 
+            os.chdir("..") 
     else:
         logging.info("Infiles found; using them")
         for myfile in infiles:
@@ -860,7 +860,7 @@ def procS1StackGroupsRTC(outfile=None,infiles=None,path=None,res=None,filter=Fal
                 filelist = filter_file_list(filelist,path,'.tif')
                 for i in xrange(len(filelist)):
                     filelist[i] = "/vsis3/" + aws + "/" + filelist[i]
-		
+                
             elif (infiles is None or len(infiles)==0):
                 # Make path into an absolute path
                 if path is not None:

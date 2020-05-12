@@ -231,7 +231,7 @@ if __name__ == "__main__":
     except:
         username = raw_input()
 
-    print "Username is {}".format(username)
+    print("Username is {}".format(username))
     api = API(username)
     api.login()
 

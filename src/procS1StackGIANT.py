@@ -117,7 +117,7 @@ def prepareHypFiles(path,hyp):
             sdate = myfile.split("_")[6]
             
         pFile = os.path.basename(myfile)
-	if not old_coh:
+        if not old_coh:
             cFile = os.path.basename(myfile.replace(ext,"_corr.tif"))
         else:
             cFile = os.path.basename(myfile.replace(ext,"_coh.tif"))
@@ -417,9 +417,9 @@ def makeGeotiffFiles(h5File,dataName,params):
             else: 
                 outFile = "{}_error_phase.raw".format(dateList[cnt])
 
-	cmd = 'gdal_translate -b {} -of ENVI HDF5:"{}"://{} {}'.format(cnt+1,h5File,dataName,outFile)
-	execute(cmd,uselogging=True)
-      	newdata = np.fromfile(outFile,dtype=np.float32,count=-1)
+        cmd = 'gdal_translate -b {} -of ENVI HDF5:"{}"://{} {}'.format(cnt+1,h5File,dataName,outFile)
+        execute(cmd,uselogging=True)
+        newdata = np.fromfile(outFile,dtype=np.float32,count=-1)
         img = np.reshape(newdata,(y,x))
         outFile = outFile.replace('.raw','.tif')
         saa.write_gdal_file_float(outFile,trans,proj,img)
@@ -696,11 +696,11 @@ def procS1StackGIANT(type,output,descFile=None,rxy=None,nvalid=0.8,nsbas=False,f
         os.remove("data.xml")
         os.remove("userfn.pyc")
         os.remove("sbas.xml")
-	os.remove("prepdataxml.py")
-	os.remove("prepsbasxml.py")
-	os.remove("userfn.py")
-	os.remove("ifg.list")
-	os.remove("example.rsc")
+        os.remove("prepdataxml.py")
+        os.remove("prepsbasxml.py")
+        os.remove("userfn.py")
+        os.remove("ifg.list")
+        os.remove("example.rsc")
        
         if train:
             for myfile in glob.glob("merra/*/*.xyz"):

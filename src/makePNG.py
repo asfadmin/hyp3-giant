@@ -52,7 +52,7 @@ def mkMovie(h5file,layer,mm=None):
         img = numpy.reshape(scene,scene.shape[1:])
         img = img[:,~(numpy.all(numpy.isnan(img), axis=0))]
         img = img[~(numpy.all(numpy.isnan(img), axis=1))]
-	
+        
         reduced = interpolation.zoom(img, .25, order=1)
          
         if mm is None: 
@@ -82,7 +82,7 @@ def mkMovie(h5file,layer,mm=None):
         # Writes Binary
         fsimg.tofile('frame' + str(i).zfill(3) + '.flat')
 
-        # Generates png with scalebar	
+        # Generates png with scalebar   
         fig_im = plt.imshow(fsimg, cmap='RdYlBu',vmin=mini,vmax=maxi)
         plt.colorbar(orientation = 'horizontal',shrink = .5,pad=.05)
         plt.axis('off')
